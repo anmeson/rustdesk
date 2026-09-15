@@ -49,3 +49,17 @@ Future<void> runLoginGate() async {
   }
   debugPrint('login gate: signed in as ${gFFI.userModel.userName.value}');
 }
+
+/// Ask for a sign-in once, for an action that needs an account.
+///
+/// Returns false if the user is still not signed in afterwards, so the caller
+/// can abandon the action. Unlike [runLoginGate] this does **not** loop --
+/// cancelling a connect should drop the connect, not trap the app.
+///
+/// Shaped after the existing upstream precedent in `desktop_setting_page.dart`
+/// (`if (!gFFI.userModel.isLogin) { final res = await loginDialog(); ... }`).
+Future<bool> ensureLoggedIn() async {
+  if (!requireLogin) return true;
+  if (gFFI.userModel.isLogin) return true;
+  return await loginDialog() == true;
+}

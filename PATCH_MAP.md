@@ -83,6 +83,7 @@ Update this block on every upstream merge, and re-verify every entry below.
 | P4 | applied 2026-09-15 | `src/rendezvous_mediator.rs` (`start_all`, `:217-224`); `libs/base/src/config/keys.rs` (`is_require_login` + its test) | `&& !crate::login_gate::is_blocked()` joined to the existing `stop-service` early-out | login gate — an unauthenticated device does not announce itself to `hbbs` (T4.3) | Structural | ⚠ **high** — `start_all` is core startup and changes often |
 | P2 | applied 2026-09-15 | **new** `flutter/lib/common/widgets/login_gate.dart`; `flutter/lib/main.dart` (`:10` import, `runMainApp` `:146-149`) | a post-frame `runLoginGate()` that holds the app at `loginDialog()` until somebody signs in | login gate — the user-facing half (T4.4) | Structural | ⚠ **high** — `runMainApp` is edited most releases |
 | P2b | applied 2026-09-15 | `src/ui_interface.rs` (`set_local_option`, `:247-258`); `src/hbbs_http/account.rs` (`auth_task`, `:304-341`) | two hooks calling `login_gate::notify_token_changed` when `access_token` is written or cleared | login gate — what actually fires the P5 channel (T4.4) | Isolated | ⚠ medium — a third write site for `access_token` would silently bypass both |
+| P3 | applied 2026-09-15 | `flutter/lib/common.dart` (`connect()` `:2584-2589`, **`handleUriLink()` `:2345-2354`**, import `:32`); `flutter/lib/common/widgets/login_gate.dart` (`ensureLoggedIn`) | refuse to start a session while the gate is on and nobody is signed in — at **two** call sites, not one | login gate — UX; `hbbs` is the enforcement point (T4.5) | Isolated | ⚠ medium — a new connect entry point that skips `connect()` would skip this too |
 
 ### Notes on the `B` rows
 
@@ -182,21 +183,25 @@ keep the old state. Grep for `"access_token"` on every merge.
 The OIDC hook drops `OIDC_SESSION`'s write guard before it fires; an IPC
 round-trip must not run under that lock.
 
-### P3 — connect gate
+### P3 — connect gate — **landed, see the table above**
 
-- **File:** `flutter/lib/common.dart` (`connect()`, `:2572`)
-- **What:** refuse and prompt for login when `require-login` is on and the user
-  is not logged in.
-- **Why:** login gate — prevents outbound connections from the UI.
-- **Type:** Isolated. A guard clause at the top of the function, beside the
-  existing `if (id == '') return;` (`:2582`).
-- **Upstream dependency:** ⚠ medium. `connect()`'s signature grows regularly
-  (`connToken`, `isSharedPassword`, `isViewCamera`, `isTerminal` are all recent).
-  The *body* start is stable; the parameter list is not.
-- **Notes:** this is UX only, **not enforcement** — `hbbs` is the enforcement
-  point (Milestone 3). Worth stating in a code comment so a future reader does
-  not mistake it for a security boundary. `connect()` is the single funnel for
-  every connect flavour, so one guard covers remote/file/terminal/port-forward/RDP.
+**`connect()` is not the single funnel this file claimed it was.** It is the
+funnel for the *UI*, but `handleUriLink()` (`:2257`) never calls it: every one
+of its five cases — remote desktop, file transfer, view camera, port forward,
+RDP — calls `rustDeskWinManager.new*` directly. So uni-links (`rustdesk://`) and
+the `--connect` command line bypassed the guard entirely.
+
+Measured before the second guard existed: a build with `require-login = 'Y'` and
+nobody signed in, launched as `RustDesk --connect <id>`, opened the remote
+window — same as an ungated build. With the guard, it does not.
+
+Two guards, then. The deeper funnel `rustDeskWinManager.new*` would have been
+one place, but it is five methods in another file and further from the decision;
+`handleUriLink` is one added clause before an untouched `switch`.
+
+**The refused link is dropped, not queued.** After signing in the user
+re-initiates. Queueing it would mean holding a connect intent across an async
+dialog, which is more machinery than the case is worth.
 
 ### P4 — registration gate — **landed, see the table above**
 

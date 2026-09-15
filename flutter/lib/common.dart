@@ -29,6 +29,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
 
 import '../consts.dart';
+import 'common/widgets/login_gate.dart';
 import 'common/widgets/overlay.dart';
 import 'mobile/pages/file_manager_page.dart';
 import 'mobile/pages/remote_page.dart';
@@ -2341,6 +2342,16 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
     }
   }
   if (type != null && id != null) {
+    // AnmesonDesk: uni-links and `--connect` do **not** go through `connect()`
+    // -- every case below calls `rustDeskWinManager` directly -- so the guard
+    // there does not cover them. Refuse the link and ask for a sign-in; the
+    // user re-initiates afterwards. Returning false lets the main window show,
+    // which is where the dialog has to appear. UX only, like the other guard:
+    // `hbbs` is the boundary.
+    if (requireLogin && !gFFI.userModel.isLogin) {
+      Future.delayed(Duration.zero, ensureLoggedIn);
+      return false;
+    }
     switch (type) {
       case UriLinkType.remoteDesktop:
         Future.delayed(Duration.zero, () {
@@ -2580,6 +2591,11 @@ connect(BuildContext context, String id,
     String? connToken,
     bool? isSharedPassword}) async {
   if (id == '') return;
+  // AnmesonDesk: refuse to start a session while `require-login` is on and
+  // nobody is signed in. This is UX, **not** enforcement -- it guards the
+  // buttons in this process and nothing else; a patched client skips it. The
+  // security boundary is `hbbs`, which authorizes every connection (T3.3).
+  if (!await ensureLoggedIn()) return;
   if (!isDesktop || desktopType == DesktopType.main) {
     try {
       if (Get.isRegistered<IDTextEditingController>()) {
