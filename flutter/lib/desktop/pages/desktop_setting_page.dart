@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/widgets/audio_input.dart';
 import 'package:flutter_hbb/common/widgets/setting_widgets.dart';
+import 'package:flutter_hbb/common/widgets/source_offer.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
@@ -2493,6 +2494,27 @@ class _AboutState extends State<_About> {
                   },
                   child: Text(
                     translate('Website'),
+                    style: linkStyle,
+                  ).marginSymmetric(vertical: 4.0)),
+              // AnmesonDesk: the AGPL notices -- modification (§5a), licence,
+              // and the offer of corresponding source (§6/§13). Placed above
+              // upstream's copyright box, which is left exactly as it was:
+              // §5(a) says add notices, not replace theirs. Not behind
+              // `require-login`; see source_offer.dart for why.
+              const Divider().marginSymmetric(vertical: 8.0),
+              SelectionArea(
+                  child: Text(modificationNotice,
+                          style: const TextStyle(fontWeight: FontWeight.w600))
+                      .marginSymmetric(vertical: 4.0)),
+              SelectionArea(
+                  child:
+                      Text(sourceOfferNotice).marginSymmetric(vertical: 4.0)),
+              InkWell(
+                  onTap: () {
+                    launchUrlString(kClientSourceUrl);
+                  },
+                  child: Text(
+                    'Source code (AGPL-3.0)',
                     style: linkStyle,
                   ).marginSymmetric(vertical: 4.0)),
               Container(

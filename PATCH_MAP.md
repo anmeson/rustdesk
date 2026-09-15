@@ -68,7 +68,8 @@ Update this block on every upstream merge, and re-verify every entry below.
 *Login-gate patches carry the prefix `P` and are pre-registered as P1–P7; the*
 *ones that have landed are rows below, the rest are still under **Planned**.*
 *Rows prefixed `B` are **build patches**, landed in T0.3 to make the client*
-*compile at all on a current macOS toolchain.*
+*compile at all on a current macOS toolchain. Rows prefixed `L` are **licence***
+***patches** (T6.1) — the only ones not behind `require-login`, deliberately.*
 
 | # | Status | File | What changed | Why | Type | Upstream dependency |
 |---|---|---|---|---|---|---|
@@ -86,6 +87,35 @@ Update this block on every upstream merge, and re-verify every entry below.
 | P3 | applied 2026-09-15 | `flutter/lib/common.dart` (`connect()` `:2584-2589`, **`handleUriLink()` `:2345-2354`**, import `:32`); `flutter/lib/common/widgets/login_gate.dart` (`ensureLoggedIn`) | refuse to start a session while the gate is on and nobody is signed in — at **two** call sites, not one | login gate — UX; `hbbs` is the enforcement point (T4.5) | Isolated | ⚠ medium — a new connect entry point that skips `connect()` would skip this too |
 | P8 | applied 2026-09-15 | `flutter/lib/models/user_model.dart` (`reset()` `:147-153`, import `:8`); `flutter/lib/common/widgets/login_gate.dart` (sub-window guard) | `runLoginGate()` at the end of `reset()`, so a logout returns to the gate | login gate — the logout half (T4.6) | Isolated | ⚠ medium — `reset()` is the single point every logout passes through; a new one that clears the token itself would skip it |
 | P6 | applied 2026-09-15 | `src/lang/template.rs`, `src/lang/en.rs`, and every other `src/lang/*.rs` (54 files, 1 line each); `flutter/lib/common/widgets/login.dart` (dialog content `:975-983`, import `:16`) | one key, `require_login_tip`, and the guarded `Text` that renders it | login gate — says why the dialog cannot be dismissed (T4.7) | Isolated | low per file, but **54 files append to the same list** — expect a conflict here every release |
+| L1 | applied 2026-09-15 | **new** `flutter/lib/common/widgets/source_offer.dart`; **new** `flutter/test/source_offer_test.dart`; `flutter/lib/desktop/pages/desktop_setting_page.dart` (import `:11`, `_AboutState` `:2499-2519`) | the AGPL notices in About — modification notice (§5a), licence, and the offer of corresponding source with the commit this binary was built from | AGPL source-availability; shipping a modified client without them is the compliance failure (T6.1) | Isolated | ⚠ medium — an additive hunk in upstream's `_AboutState` column, and **unconditional**: no flag switches it off |
+
+### Notes on the `L` row
+
+**Why it is not behind `require-login`.** Rule 8 is the rule this breaks, and on
+purpose. The obligation attaches to the *binary we distribute*, which is a
+modified RustDesk whether the flag is on or off — so a notice the flag could
+switch off would be missing from exactly the builds that still need it. Reverting
+L1 to make a merge easier therefore ships a non-compliant binary, which is not a
+trade the other rows offer. See the parent repo's docs/LICENSING.md §3 (not in this fork).
+
+**It is additive, and upstream's box is untouched.** The hunk goes in above
+upstream's blue copyright container and changes nothing already there: §5(a) says
+to *add* notices, not replace them, and removing upstream's would be its own
+violation. If `_AboutState` is rewritten upstream, re-apply the hunk; do not
+"merge" it into whatever replaces the copyright box.
+
+**The commit stamp arrives by `--dart-define`, not by FFI.** `gen_version()`
+writes only `VERSION` and `BUILD_DATE`, and `VERSION` is upstream's `1.5.0` —
+useless for identifying corresponding source. Stamping from Rust would mean
+patching the submodule *and* adding an FFI call (the thing T4.8 exists to avoid).
+So `ANMESON_SOURCE_COMMIT` / `ANMESON_SOURCE_DATE` are build-time defines, which
+puts a requirement on the build recipe rather than on this tree: **an unstamped
+release binary is a compliance failure that compiles perfectly.** docs/BUILD.md
+and LICENSING.md §5 both carry the step.
+
+**The test is the regression guard.** `flutter test test/source_offer_test.dart`
+— 8 tests with both defines set, 6 without (2 skipped). It does not render the
+widget; it pins the notice text, both URLs, and the stamp behaviour.
 
 ### Notes on the `B` rows
 
