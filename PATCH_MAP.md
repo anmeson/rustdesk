@@ -81,6 +81,8 @@ Update this block on every upstream merge, and re-verify every entry below.
 | P1 | applied 2026-09-15 | `libs/base/src/config/keys.rs` (`:183-185`, `:333-334`, `:376-392`) | `OPTION_REQUIRE_LOGIN = "require-login"`, appended to `KEYS_SETTINGS`, plus a `require_login()` helper | login gate — the single switch every other patch reads (T4.1) | Isolated | low — `libs/base` is client-only; the key lists near `:193+` get reordered, so append |
 | P5 | applied 2026-09-15 | **new** `src/login_gate.rs`; `src/lib.rs` (`:18-19`); `src/ipc.rs` (`Data::LoginState` `:559-564`, handler `:1057-1059`, `notify_login_state` `:1993-1999`, test `:2255-2275`) | one bit — "a user is signed in" — from the GUI to the service, and the service-side state the gate reads | login gate — T4.3 cannot work without it (T4.2) | Isolated | ⚠ medium — `Data` variants are added upstream often; append at the end, never insert |
 | P4 | applied 2026-09-15 | `src/rendezvous_mediator.rs` (`start_all`, `:217-224`); `libs/base/src/config/keys.rs` (`is_require_login` + its test) | `&& !crate::login_gate::is_blocked()` joined to the existing `stop-service` early-out | login gate — an unauthenticated device does not announce itself to `hbbs` (T4.3) | Structural | ⚠ **high** — `start_all` is core startup and changes often |
+| P2 | applied 2026-09-15 | **new** `flutter/lib/common/widgets/login_gate.dart`; `flutter/lib/main.dart` (`:10` import, `runMainApp` `:146-149`) | a post-frame `runLoginGate()` that holds the app at `loginDialog()` until somebody signs in | login gate — the user-facing half (T4.4) | Structural | ⚠ **high** — `runMainApp` is edited most releases |
+| P2b | applied 2026-09-15 | `src/ui_interface.rs` (`set_local_option`, `:247-258`); `src/hbbs_http/account.rs` (`auth_task`, `:304-341`) | two hooks calling `login_gate::notify_token_changed` when `access_token` is written or cleared | login gate — what actually fires the P5 channel (T4.4) | Isolated | ⚠ medium — a third write site for `access_token` would silently bypass both |
 
 ### Notes on the `B` rows
 
@@ -142,20 +144,43 @@ Two findings from writing it, both of which the row above cannot hold:
   stock build. The `require_login()` helper compares against `"Y"` explicitly
   for exactly this reason, and carries the warning in a comment beside it.
 
-### P2 — UI login gate at app start
+### P2 — UI login gate at app start — **landed, see the table above**
 
-- **File:** `flutter/lib/main.dart` (`runMainApp`, `:133-144`)
-- **What:** when `require-login` is on and `gFFI.userModel.isLogin` is false,
-  route to the existing login flow before the main window is shown.
-- **Why:** login gate — the user-facing half.
-- **Type:** Structural. `runMainApp` is startup sequencing; ordering matters
-  (`:140` `startService()`, `:143` `refreshCurrentUser()`, `:144` `runApp`).
-- **Upstream dependency:** ⚠ **high.** `runMainApp` is edited often — window
-  management, uni-links, theming. Expect a conflict on most merges. Also depends
-  on `UserModel.isLogin` (`flutter/lib/models/user_model.dart:26`).
-- **Notes:** reuse `flutter/lib/common/widgets/login.dart` (1131 lines, already
-  handles password + OIDC). Do not write a second login screen. Keep the patch to
-  a guard clause plus one call; resist restructuring the function.
+`runMainApp` takes **one** added line, a post-frame callback; everything else is
+in `login_gate.dart`, which is ours. Post-frame rather than before `runApp`
+because `loginDialog()` needs an overlay, and `OverlayKeyState.state` falls back
+to `globalKey.currentState?.overlay` — which exists only once the first frame is
+built. Nothing in upstream's ordering (`startService()`, `refreshCurrentUser()`,
+`runApp`) moved.
+
+**`refreshCurrentUser()` is not awaited upstream, and that turns out not to
+matter.** It sets `userName` from the locally cached `user_info`
+*synchronously*, before its first `await`, so by post-frame time a remembered
+user already reads as signed in and sees no dialog. Verified, not assumed.
+
+**Cancelling re-opens the dialog.** There is nothing behind it the user may
+touch, so the loop only exits on a real sign-in. The trap that comes with that:
+Settings is unreachable from the dialog, so a build pointed at an unreachable
+API server has no in-app way out. The documented escape is to clear
+`require-login` from `RustDesk2.toml`.
+
+**Out of scope, deliberately: `runMobileApp` (`:176-186`) is not gated.** T4.4
+names `runMainApp`. Mobile has the same two lines available if it is ever
+wanted.
+
+### P2b — the two token hooks
+
+`access_token` *is* the login state, and it is written from two places that
+share no call site: `ui_interface::set_local_option` (password login, and every
+logout including the 401 reset) and `hbbs_http::account.rs` (OIDC, which writes
+`LocalConfig` directly). The one place that would catch both is
+`LocalConfig::set_option`, in the `hbb_common` submodule — off limits. So there
+are two hooks, and **a third write site added upstream would silently bypass the
+gate's notification**: nothing would fail to compile, the service would simply
+keep the old state. Grep for `"access_token"` on every merge.
+
+The OIDC hook drops `OIDC_SESSION`'s write guard before it fires; an IPC
+round-trip must not run under that lock.
 
 ### P3 — connect gate
 

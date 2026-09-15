@@ -7,6 +7,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
+import 'package:flutter_hbb/common/widgets/login_gate.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
@@ -142,6 +143,10 @@ void runMainApp(bool startService) async {
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
   gFFI.userModel.refreshCurrentUser();
   runApp(App());
+  // AnmesonDesk: hold at the login dialog when `require-login` is on. After
+  // runApp, because the dialog needs the overlay that the first frame builds;
+  // the ordering above it is upstream's and is left alone.
+  WidgetsBinding.instance.addPostFrameCallback((_) => runLoginGate());
 
   bool? alwaysOnTop;
   if (isDesktop) {

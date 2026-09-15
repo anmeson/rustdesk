@@ -301,8 +301,17 @@ impl OidcSession {
                     if !session.is_current_auth_attempt(auth_attempt) {
                         return;
                     }
+                    // AnmesonDesk: set when the token below is stored, so the
+                    // service can be told after OIDC_SESSION's write guard is
+                    // dropped -- an IPC round-trip must not run under it.
+                    #[cfg(not(target_os = "ios"))]
+                    let mut stored_token = None;
                     if auth_body.r#type == "access_token" {
                         if remember_me {
+                            #[cfg(not(target_os = "ios"))]
+                            {
+                                stored_token = Some(auth_body.access_token.clone());
+                            }
                             LocalConfig::set_option(
                                 "access_token".to_owned(),
                                 auth_body.access_token.clone(),
@@ -321,6 +330,14 @@ impl OidcSession {
                     }
                     session.set_state(LOGIN_ACCOUNT_AUTH, "".to_owned());
                     session.auth_body = Some(auth_body);
+                    // AnmesonDesk: OIDC writes the token here instead of going
+                    // through `ui_interface::set_local_option`, so this is the
+                    // second of the gate's two hooks. See src/login_gate.rs.
+                    #[cfg(not(target_os = "ios"))]
+                    if let Some(token) = stored_token {
+                        drop(session);
+                        crate::login_gate::notify_token_changed(&token);
+                    }
                     return;
                 }
                 Ok(HbbHttpResponse::<_>::Error(err)) => {
