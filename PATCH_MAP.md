@@ -85,6 +85,7 @@ Update this block on every upstream merge, and re-verify every entry below.
 | P2b | applied 2026-09-15 | `src/ui_interface.rs` (`set_local_option`, `:247-258`); `src/hbbs_http/account.rs` (`auth_task`, `:304-341`) | two hooks calling `login_gate::notify_token_changed` when `access_token` is written or cleared | login gate — what actually fires the P5 channel (T4.4) | Isolated | ⚠ medium — a third write site for `access_token` would silently bypass both |
 | P3 | applied 2026-09-15 | `flutter/lib/common.dart` (`connect()` `:2584-2589`, **`handleUriLink()` `:2345-2354`**, import `:32`); `flutter/lib/common/widgets/login_gate.dart` (`ensureLoggedIn`) | refuse to start a session while the gate is on and nobody is signed in — at **two** call sites, not one | login gate — UX; `hbbs` is the enforcement point (T4.5) | Isolated | ⚠ medium — a new connect entry point that skips `connect()` would skip this too |
 | P8 | applied 2026-09-15 | `flutter/lib/models/user_model.dart` (`reset()` `:147-153`, import `:8`); `flutter/lib/common/widgets/login_gate.dart` (sub-window guard) | `runLoginGate()` at the end of `reset()`, so a logout returns to the gate | login gate — the logout half (T4.6) | Isolated | ⚠ medium — `reset()` is the single point every logout passes through; a new one that clears the token itself would skip it |
+| P6 | applied 2026-09-15 | `src/lang/template.rs`, `src/lang/en.rs`, and every other `src/lang/*.rs` (54 files, 1 line each); `flutter/lib/common/widgets/login.dart` (dialog content `:975-983`, import `:16`) | one key, `require_login_tip`, and the guarded `Text` that renders it | login gate — says why the dialog cannot be dismissed (T4.7) | Isolated | low per file, but **54 files append to the same list** — expect a conflict here every release |
 
 ### Notes on the `B` rows
 
@@ -280,18 +281,24 @@ signed in), then the 401 clears the token, `login_gate.rs:48` logs
 not start again, and the gate line appears on stdout after `pullAb` — i.e. from
 `reset()`, not from startup.
 
-### P6 — localization keys
+### P6 — localization keys — **landed, see the table above**
 
-- **Files:** `src/lang/template.rs`, `src/lang/en.rs`, `src/lang/*.rs` (~70 files)
-- **What:** new keys for the gate's user-facing strings.
-- **Why:** login gate — UI strings.
-- **Type:** Isolated. Append-only.
-- **Upstream dependency:** low, but **high conflict frequency** — every upstream
-  release appends here too, and appending at the end of the same list is a
-  textbook conflict. Trivial to resolve, tedious at ~70 files.
-- **Notes:** upstream's rules (`AGENTS.md` → Localization): sentence case; append
-  to `template.rs` and every language file; `it.rs` always gets `""`; a key that
-  is already plain English needs no `en.rs` entry.
+**One key, not several, and it very nearly was none.** The gate reuses
+`loginDialog()` verbatim, so it introduced no strings of its own — P6 would have
+been a no-op. What it did introduce is a dialog that **re-opens when you close
+it**, with nothing on screen saying why. `require_login_tip` is that sentence,
+and it is the only string the gate needs.
+
+It renders from a guarded `if` inside the existing `content:` list of the login
+dialog, so with `require-login` off upstream's dialog is byte-identical.
+
+**Every file gets `""`; only `en.rs` carries text.** `translate_locale`
+(`src/lang.rs:263-274`) falls back to `en.rs` on an empty value and to the key
+itself after that, so an untranslated locale shows the English sentence rather
+than a key. Machine-translating 52 languages unreviewed would have been worse
+than a correct English fallback — but they *are* untranslated, and that is a
+follow-up, not a finished job. `it.rs` gets `""` by upstream's rule and must be
+left to its translator.
 
 ### P7 — FFI surface for login state *(only if needed)*
 

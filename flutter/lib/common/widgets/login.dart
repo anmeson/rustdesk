@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../common.dart';
 import './dialog.dart';
 import './oidc_auth_status.dart';
+import 'login_gate.dart';
 
 const kOpSvgList = [
   'github',
@@ -972,6 +973,14 @@ Future<bool?> _openLoginDialog() async {
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          // AnmesonDesk: say why this dialog keeps coming back. Inert with
+          // `require-login` off, so an ungated build renders upstream's dialog.
+          if (requireLogin && !gFFI.userModel.isLogin)
+            Text(
+              translate('require_login_tip'),
+              style: const TextStyle(fontSize: 13),
+              textAlign: TextAlign.center,
+            ).marginOnly(top: 8),
           const SizedBox(
             height: 8.0,
           ),
