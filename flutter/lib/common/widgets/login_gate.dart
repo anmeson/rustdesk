@@ -37,6 +37,10 @@ bool get requireLogin =>
 /// from here.
 Future<void> runLoginGate() async {
   if (!requireLogin) return;
+  // Only the main window has a gate to return to. A remote-desktop, file-
+  // transfer or CM sub-window is a separate process with its own FFI, and a
+  // login dialog there would be shown over somebody's live session.
+  if (isDesktop && desktopType != DesktopType.main) return;
   if (gFFI.userModel.isLogin) return;
   // Says why the app opened on a login dialog, which is otherwise
   // indistinguishable from one the user asked for.

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:bot_toast/bot_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common/hbbs/hbbs.dart';
+import 'package:flutter_hbb/common/widgets/login_gate.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
 import 'package:get/get.dart';
 
@@ -145,6 +146,12 @@ class UserModel {
     userName.value = '';
     displayName.value = '';
     avatar.value = '';
+    // AnmesonDesk: the token is gone, so the gate closes again. Every logout
+    // lands here -- the Logout button, and the 401 reset when a session
+    // expires. The service is told separately, by the Rust-side hook on the
+    // `access_token` write above. Not awaited: no caller of reset() wants to
+    // block until somebody signs back in.
+    runLoginGate();
   }
 
   _parseAndUpdateUser(UserPayload user) {

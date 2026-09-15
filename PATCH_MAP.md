@@ -84,6 +84,7 @@ Update this block on every upstream merge, and re-verify every entry below.
 | P2 | applied 2026-09-15 | **new** `flutter/lib/common/widgets/login_gate.dart`; `flutter/lib/main.dart` (`:10` import, `runMainApp` `:146-149`) | a post-frame `runLoginGate()` that holds the app at `loginDialog()` until somebody signs in | login gate — the user-facing half (T4.4) | Structural | ⚠ **high** — `runMainApp` is edited most releases |
 | P2b | applied 2026-09-15 | `src/ui_interface.rs` (`set_local_option`, `:247-258`); `src/hbbs_http/account.rs` (`auth_task`, `:304-341`) | two hooks calling `login_gate::notify_token_changed` when `access_token` is written or cleared | login gate — what actually fires the P5 channel (T4.4) | Isolated | ⚠ medium — a third write site for `access_token` would silently bypass both |
 | P3 | applied 2026-09-15 | `flutter/lib/common.dart` (`connect()` `:2584-2589`, **`handleUriLink()` `:2345-2354`**, import `:32`); `flutter/lib/common/widgets/login_gate.dart` (`ensureLoggedIn`) | refuse to start a session while the gate is on and nobody is signed in — at **two** call sites, not one | login gate — UX; `hbbs` is the enforcement point (T4.5) | Isolated | ⚠ medium — a new connect entry point that skips `connect()` would skip this too |
+| P8 | applied 2026-09-15 | `flutter/lib/models/user_model.dart` (`reset()` `:147-153`, import `:8`); `flutter/lib/common/widgets/login_gate.dart` (sub-window guard) | `runLoginGate()` at the end of `reset()`, so a logout returns to the gate | login gate — the logout half (T4.6) | Isolated | ⚠ medium — `reset()` is the single point every logout passes through; a new one that clears the token itself would skip it |
 
 ### Notes on the `B` rows
 
@@ -258,6 +259,26 @@ one place that would catch both is `LocalConfig::set_option` itself, in the
 `hbb_common` submodule — off limits. Note also that the OIDC site holds
 `OIDC_SESSION.write()` across its writes, so the hook belongs after that scope,
 not inside it.
+
+### P8 — logout returns to the gate *(not pre-registered; T4.6)*
+
+T4.6 asks for three things and **two were already done**: clearing the token is
+upstream's own `reset()`, and stopping the mediator is the P2b hook firing on
+the `access_token` write. Only "return to the gate" needed code, and it is one
+call at the end of `reset()` — the single point every logout passes through,
+the Logout button and the 401 reset alike.
+
+`runLoginGate()` gained a sub-window guard for this: `reset()` can run in a
+remote-desktop, file-transfer or CM window, each its own process with its own
+FFI, and a login dialog there would appear over somebody's live session.
+
+Measured end to end: with `require-login = 'Y'`, a stale token and
+`anmeson-login-state = 'Y'`, the app starts ungated (the cached user reads as
+signed in), then the 401 clears the token, `login_gate.rs:48` logs
+`logged_in=false, restarting mediator`, `rendezvous_mediator.rs:178` logs
+`server restart`, the persisted state is gone from the config, the mediator does
+not start again, and the gate line appears on stdout after `pullAb` — i.e. from
+`reset()`, not from startup.
 
 ### P6 — localization keys
 
