@@ -300,20 +300,24 @@ than a correct English fallback — but they *are* untranslated, and that is a
 follow-up, not a finished job. `it.rs` gets `""` by upstream's rule and must be
 left to its translator.
 
-### P7 — FFI surface for login state *(only if needed)*
+### P7 — FFI surface for login state — **not needed; no patch exists (T4.8)**
 
-- **File:** `src/flutter_ffi.rs`
-- **What:** expose the gate's state to Dart, if the existing untyped
-  `ffiGetByName` / `ffiSetByName` channel is not sufficient.
-- **Why:** login gate — Dart↔Rust plumbing.
-- **Type:** Isolated. A new `pub fn` in a 3020-line file of them.
-- **Upstream dependency:** low for the function; ⚠ the **build** dependency is the
-  catch — `flutter_rust_bridge_codegen` v1.80.1 must regenerate
-  `src/bridge_generated.rs` and `flutter/lib/generated_bridge.dart`, both
-  gitignored (`.gitignore:22-23,46`). The generated bridge never appears in a diff.
-- **Notes:** **prefer no patch at all.** Try `bind.mainGetOption('require-login')`
-  through the existing option plumbing first. Every avoided FFI addition is one
-  less thing to regenerate and re-verify after a merge.
+**`src/flutter_ffi.rs` is untouched, and the bridge was never regenerated.**
+`git diff <fork-base>..HEAD -- src/flutter_ffi.rs` is empty. The whole gate rides
+on bridge functions upstream already exports:
+
+| What the gate needs | What it uses |
+|---|---|
+| read `require-login` from Dart | `bind.mainGetOptionSync(key: 'require-login')` — lands on the IPC-synced options map, which is why P1 put the key in `KEYS_SETTINGS` |
+| tell the service about a login or logout | **nothing new.** Dart already calls `bind.mainSetLocalOption(key: 'access_token', …)`; P2b hooks the *Rust* side of that existing call |
+
+The second row is the one that could have gone the other way. A Dart-side
+`notifyLoginState()` would have been the obvious design and would have cost an
+FFI function plus a `flutter_rust_bridge_codegen` v1.80.1 regeneration on every
+merge. Hooking the Rust side of a call Dart already makes avoids it entirely.
+
+**Keep it that way.** If a future task reaches for `flutter_ffi.rs`, check first
+whether the thing it wants can hang off an existing bridge call.
 
 ---
 
