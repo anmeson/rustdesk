@@ -556,6 +556,12 @@ pub enum Data {
         hotx: i32,
         hoty: i32,
     },
+    // AnmesonDesk: GUI -> service, "a user is signed in on this device" (or is
+    // not, on logout). One bit; the account token never crosses this boundary.
+    // Appended, never inserted -- `Data` is `#[serde(tag="t", content="c")]`, so
+    // a new variant is wire-compatible both ways, but only while the existing
+    // ones keep their names.
+    LoginState(bool),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -1047,6 +1053,9 @@ async fn handle(data: Data, stream: &mut Connection) {
         Data::Deployed => {
             crate::rendezvous_mediator::NEEDS_DEPLOY.store(false, Ordering::SeqCst);
             crate::rendezvous_mediator::RendezvousMediator::restart();
+        }
+        Data::LoginState(logged_in) => {
+            crate::login_gate::set_logged_in(logged_in);
         }
         #[cfg(feature = "flutter")]
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1981,6 +1990,15 @@ pub async fn notify_deployed() -> ResultType<()> {
     Ok(())
 }
 
+// AnmesonDesk: tell the service a user signed in or out. Modelled on
+// `notify_deployed` above, down to the timeout.
+#[tokio::main(flavor = "current_thread")]
+pub async fn notify_login_state(logged_in: bool) -> ResultType<()> {
+    let mut c = connect(1000, "").await?;
+    c.send(&Data::LoginState(logged_in)).await?;
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
 pub async fn send_url_scheme(url: String) -> ResultType<()> {
     connect(1_000, "_url")
@@ -2232,6 +2250,28 @@ mod test {
     fn verify_ffi_enum_data_size() {
         println!("{}", std::mem::size_of::<Data>());
         assert!(std::mem::size_of::<Data>() <= 120);
+    }
+
+    // AnmesonDesk: `Data` is `#[serde(tag = "t", content = "c")]`, which is what
+    // makes appending `LoginState` wire-compatible in both directions -- an old
+    // peer sees an unknown tag and fails that one message rather than
+    // misreading a neighbouring variant, as a positional encoding would. This
+    // pins that property so a future upstream merge cannot quietly drop the
+    // attribute and turn our IPC into silent corruption.
+    #[test]
+    fn login_state_is_tagged_on_the_wire() {
+        let json = serde_json::to_string(&Data::LoginState(true)).unwrap();
+        assert_eq!(json, r#"{"t":"LoginState","c":true}"#);
+        assert!(matches!(
+            serde_json::from_str::<Data>(&json).unwrap(),
+            Data::LoginState(true)
+        ));
+        assert!(matches!(
+            serde_json::from_str::<Data>(r#"{"t":"LoginState","c":false}"#).unwrap(),
+            Data::LoginState(false)
+        ));
+        // The token must never ride along: one bool is the whole payload.
+        assert_eq!(std::mem::size_of_val(&Data::LoginState(true)), std::mem::size_of::<Data>());
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
