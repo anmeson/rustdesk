@@ -214,8 +214,13 @@ impl RendezvousMediator {
             let timeout = Arc::new(RwLock::new(CONNECT_TIMEOUT));
             let conn_start_time = Instant::now();
             *SOLVING_PK_MISMATCH.lock().await = "".to_owned();
+            // AnmesonDesk: an unauthenticated device does not announce itself.
+            // Joined to the `stop-service` early-out rather than parked above
+            // the loop like `is_outgoing_only`, so that signing in is enough to
+            // start registering -- the condition is re-read on every pass.
             if !config::option2bool("stop-service", &Config::get_option("stop-service"))
                 && !crate::platform::installing_service()
+                && !crate::login_gate::is_blocked()
             {
                 let mut futs = Vec::new();
                 let servers = Config::get_rendezvous_servers();

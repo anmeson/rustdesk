@@ -388,7 +388,15 @@ pub const KEYS_BUILDIN_SETTINGS: &[&str] = &[
 // from Dart -- so both sides agree on one value.
 #[inline]
 pub fn require_login() -> bool {
-    hbb_common::config::Config::get_option(OPTION_REQUIRE_LOGIN) == "Y"
+    is_require_login(&hbb_common::config::Config::get_option(OPTION_REQUIRE_LOGIN))
+}
+
+// Split out so the off-by-default rule can be pinned by a test without a config
+// file. The gate is on for "Y" and nothing else -- not "y", not "1", not a
+// non-empty string.
+#[inline]
+pub fn is_require_login(value: &str) -> bool {
+    value == "Y"
 }
 
 #[cfg(test)]
@@ -398,6 +406,25 @@ mod tests {
     /// both sides would therefore compile, with the client and the server
     /// disagreeing about its string value and nothing to signal it. Keep the
     /// two sets apart.
+    /// The gate must be opt-in. `option2bool`'s fallback arm is `value != "N"`,
+    /// so routing this key through `Config::get_bool_option` would turn the
+    /// login gate ON for every build that has never heard of it -- a fleet that
+    /// cannot connect, from a key nobody set. If the first assertion here ever
+    /// fails, upstream changed that arm and the comment on `require_login`
+    /// needs re-reading; it does not mean this test should be deleted.
+    #[test]
+    fn require_login_is_off_unless_explicitly_on() {
+        assert!(
+            hbb_common::config::option2bool(super::OPTION_REQUIRE_LOGIN, ""),
+            "option2bool no longer defaults this key to true"
+        );
+        assert!(!super::is_require_login(""));
+        assert!(!super::is_require_login("N"));
+        assert!(!super::is_require_login("y"));
+        assert!(!super::is_require_login("1"));
+        assert!(super::is_require_login("Y"));
+    }
+
     #[test]
     fn key_names_do_not_collide_with_hbb_common() {
         fn names(src: &str) -> Vec<&str> {
