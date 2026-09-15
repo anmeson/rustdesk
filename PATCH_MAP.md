@@ -70,6 +70,8 @@ Update this block on every upstream merge, and re-verify every entry below.
 *Rows prefixed `B` are **build patches**, landed in T0.3 to make the client*
 *compile at all on a current macOS toolchain. Rows prefixed `L` are **licence***
 ***patches** (T6.1) — the only ones not behind `require-login`, deliberately.*
+*Rows prefixed `C` are **branding patches** (T6.2), which run before any option*
+*is readable and so cannot be flagged either.*
 
 | # | Status | File | What changed | Why | Type | Upstream dependency |
 |---|---|---|---|---|---|---|
@@ -88,6 +90,30 @@ Update this block on every upstream merge, and re-verify every entry below.
 | P8 | applied 2026-09-15 | `flutter/lib/models/user_model.dart` (`reset()` `:147-153`, import `:8`); `flutter/lib/common/widgets/login_gate.dart` (sub-window guard) | `runLoginGate()` at the end of `reset()`, so a logout returns to the gate | login gate — the logout half (T4.6) | Isolated | ⚠ medium — `reset()` is the single point every logout passes through; a new one that clears the token itself would skip it |
 | P6 | applied 2026-09-15 | `src/lang/template.rs`, `src/lang/en.rs`, and every other `src/lang/*.rs` (54 files, 1 line each); `flutter/lib/common/widgets/login.dart` (dialog content `:975-983`, import `:16`) | one key, `require_login_tip`, and the guarded `Text` that renders it | login gate — says why the dialog cannot be dismissed (T4.7) | Isolated | low per file, but **54 files append to the same list** — expect a conflict here every release |
 | L1 | applied 2026-09-15 | **new** `flutter/lib/common/widgets/source_offer.dart`; **new** `flutter/test/source_offer_test.dart`; `flutter/lib/desktop/pages/desktop_setting_page.dart` (import `:11`, `_AboutState` `:2499-2519`) | the AGPL notices in About — modification notice (§5a), licence, and the offer of corresponding source with the commit this binary was built from | AGPL source-availability; shipping a modified client without them is the compliance failure (T6.1) | Isolated | ⚠ medium — an additive hunk in upstream's `_AboutState` column, and **unconditional**: no flag switches it off |
+| C1 | applied 2026-09-15 | `src/common.rs` (`read_custom_client`, `:2327-2343`); `build.rs` (`:105-109`) | the `custom.txt` trust anchor read from `ANMESON_CUSTOM_PK` at compile time, upstream's key as the fallback | upstream signs `custom.txt` with a key we do not have, so a config we write is discarded — this is the whole of T6.2 | Isolated | ⚠ medium — upstream owns the const and could move or rename it; a merge that drops this row silently reverts every branded build to trusting Purslane |
+
+### Notes on the `C` row
+
+**It is not behind `require-login` because it cannot be.** `read_custom_client`
+is what *delivers* `require-login` to a branded build; a flag-gated trust anchor
+would have to read the flag out of the file it has not verified yet. Same
+category as the `B` rows: there is no upstream path to fall back to, only a
+build that trusts a different key.
+
+**Unset, it is upstream exactly.** `option_env!` resolves at compile time, so a
+build with no `ANMESON_CUSTOM_PK` has upstream's key in the binary and verifies
+upstream-signed configs. That is the closest thing to rule 8 this patch can
+offer, and it is worth preserving in any rewrite of it.
+
+**The failure mode is silence.** A client and a `custom.txt` signed by different
+keys produce one ERROR line in the log and a client that quietly uses its
+built-in defaults — no crash, no dialog, nothing in the UI. After any merge that
+touches this, rebuild with the key set and confirm a signed config still takes
+effect; docs/BRANDING.md §7 lists what to look for.
+
+**`build.rs` is half the patch.** Without `rerun-if-env-changed`, cargo happily
+reuses an object file compiled against the *previous* key, and the resulting
+binary rejects the config you just signed.
 
 ### Notes on the `L` row
 

@@ -2324,7 +2324,23 @@ pub fn read_custom_client(config: &str) {
         log::error!("Failed to decode custom client config");
         return;
     };
-    const KEY: &str = "5Qbwsde3unUcJBtrx9ZkvUmwFNoExHzpryHuPUdqlWM=";
+    // AnmesonDesk: which signing authority a `custom.txt` has to carry.
+    //
+    // Upstream's key is Purslane's and we do not hold its private half, so a
+    // `custom.txt` *we* write is rejected at the `sign::verify` below --
+    // measured on the real binary, not inferred: `ERROR Failed to dec custom
+    // client config`. That is what makes T6.2's "bake the branding with no
+    // source change" impossible for this fork, and this is the one line that
+    // makes the rest of upstream's mechanism ours. Build with
+    // `ANMESON_CUSTOM_PK` set to the base64 public key whose private half
+    // signed the config (`tools/custom-client.py`).
+    //
+    // Unset, this is byte-for-byte upstream's key and an upstream-signed
+    // config still verifies: a stock build stays a stock build.
+    const KEY: &str = match option_env!("ANMESON_CUSTOM_PK") {
+        Some(k) => k,
+        None => "5Qbwsde3unUcJBtrx9ZkvUmwFNoExHzpryHuPUdqlWM=",
+    };
     let Some(pk) = get_rs_pk(KEY) else {
         log::error!("Failed to parse public key of custom client");
         return;

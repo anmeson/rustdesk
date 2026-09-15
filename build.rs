@@ -102,4 +102,9 @@ fn main() {
         build_android_ifaddrs();
     }
     println!("cargo:rerun-if-changed=build.rs");
+    // AnmesonDesk: the custom.txt signing authority is read with `option_env!`
+    // in src/common.rs, and cargo cannot see that dependency on its own -- a
+    // changed key would otherwise reuse a stale object file and ship a build
+    // that trusts the previous one.
+    println!("cargo:rerun-if-env-changed=ANMESON_CUSTOM_PK");
 }
