@@ -55,6 +55,34 @@ def system2(cmd):
         sys.exit(-1)
 
 
+# --- AnmesonDesk patch B7 -------------------------------------------------
+# Forward our build-time stamp to every `flutter build` this script runs.
+#
+# Upstream's calls below are bare `flutter build <platform> --release`, and
+# `--dart-define` is the only way a value reaches `String.fromEnvironment`.
+# Without this, a release built through build.py -- which is how upstream's CI
+# builds every platform -- silently produces a binary whose About screen says
+# "unreleased local build" and names no commit. That compiles, runs, passes
+# tests, and is an AGPL compliance failure (docs/LICENSING.md §5).
+#
+# Deliberately a fixed allow-list rather than "export anything ANMESON_*": a
+# build script that copies arbitrary environment into the shipped binary is a
+# way to leak a secret by accident.
+ANMESON_DART_DEFINES = ('ANMESON_SOURCE_COMMIT', 'ANMESON_SOURCE_DATE')
+
+
+def dart_defines():
+    """` --dart-define=K=V` for each stamp var that is set, or '' if none are.
+
+    Empty is the correct behaviour for a dev build: source_offer.dart falls back
+    to saying so, which is honest. It is release-preflight.sh's job, not this
+    one's, to insist they are present.
+    """
+    return ''.join(f' --dart-define={k}={os.environ[k]}'
+                   for k in ANMESON_DART_DEFINES if os.environ.get(k))
+# --- end B7 ---------------------------------------------------------------
+
+
 def get_version():
     with open("Cargo.toml", encoding="utf-8") as fh:
         for line in fh:
@@ -701,7 +729,7 @@ def build_flutter_deb(version, features):
         system2(f'cargo build --locked --features {features} --lib --release')
         ffi_bindgen_function_refactor()
     os.chdir('flutter')
-    system2('flutter build linux --release')
+    system2(f'flutter build linux --release{dart_defines()}')
     system2('mkdir -p tmpdeb/usr/bin/')
     system2('mkdir -p tmpdeb/usr/share/rustdesk')
     system2('mkdir -p tmpdeb/usr/share/rustdesk/files/systemd/')
@@ -905,7 +933,7 @@ def build_flutter_dmg(version, features):
     # FLUTTER_XCODE_* env vars are forwarded to xcodebuild as build settings.
     mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x86_64'
     system2(
-        f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES flutter build macos --release')
+        f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES flutter build macos --release{dart_defines()}')
     system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/RustDesk.app/Contents/MacOS/')
     '''
     system2(
@@ -920,7 +948,7 @@ def build_flutter_arch_manjaro(version, features):
         system2(f'cargo build --locked --features {features} --lib --release')
     ffi_bindgen_function_refactor()
     os.chdir('flutter')
-    system2('flutter build linux --release')
+    system2(f'flutter build linux --release{dart_defines()}')
     system2(f'strip {flutter_build_dir}/lib/librustdesk.so')
     os.chdir('../res')
     system2('HBB=`pwd`/.. FLUTTER=1 makepkg -f')
@@ -933,7 +961,7 @@ def build_flutter_windows(version, features, skip_portable_pack):
             print("cargo build failed, please check rust source code.")
             exit(-1)
     os.chdir('flutter')
-    system2('flutter build windows --release')
+    system2(f'flutter build windows --release{dart_defines()}')
     os.chdir('..')
     shutil.copy2('target/release/deps/dylib_virtual_display.dll',
                  flutter_build_dir_2)
