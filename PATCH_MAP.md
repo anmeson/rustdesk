@@ -439,12 +439,12 @@ Shared byte-for-byte with `apps/rustdesk-server`. Changing it means changing a
 third repository and bumping the pointer in both forks — upstream's own guidance
 (`AGENTS.md`) is to avoid it and put client-only code in `libs/base` instead.
 
-**Current plan: zero patches here.** Two known pressures that could force one,
-both deferred:
+**Current plan: zero patches here** — and after T6.6, one of the two known
+pressures is closed rather than deferred:
 
 | Pressure | Where | Milestone |
 |---|---|---|
-| Hardcoded update-check URL `https://api.rustdesk.com/version/latest` | `libs/hbb_common/src/lib.rs:511` | 6 — only if we take over the update channel |
+| ~~Hardcoded update-check URL `https://api.rustdesk.com/version/latest`~~ | `libs/hbb_common/src/lib.rs:511` | **closed by T6.6 (2026-09-16)** — we do not own the update channel; it is disabled from `custom.txt` instead, so this line is never reached and needs no patch. See [docs/UPDATES.md](../../docs/UPDATES.md) |
 | Any change to `rendezvous.proto` | `libs/hbb_common/protos/rendezvous.proto` | none planned — `PunchHoleRequest.token` and `PunchHoleResponse.other_failure` already carry everything Milestone 3 needs |
 
 If a proto change ever becomes necessary: it must be applied to **both** forks'
