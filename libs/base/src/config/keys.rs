@@ -180,7 +180,7 @@ pub const OPTION_DISABLE_GROUP_PANEL: &str = "disable-group-panel";
 pub const OPTION_DISABLE_DISCOVERY_PANEL: &str = "disable-discovery-panel";
 pub const OPTION_PRE_ELEVATE_SERVICE: &str = "pre-elevate-service";
 
-// AnmesonDesk: master switch for the login gate. Appended, never inserted --
+// TraceMote: master switch for the login gate. Appended, never inserted --
 // the key lists below get reordered upstream.
 pub const OPTION_REQUIRE_LOGIN: &str = "require-login";
 
@@ -330,7 +330,7 @@ pub const KEYS_SETTINGS: &[&str] = &[
     OPTION_ALLOW_AUTO_UPDATE,
     OPTION_ALLOW_KCP_CC,
     OPTION_ALLOW_WEBRTC_CC,
-    // AnmesonDesk
+    // TraceMote
     OPTION_REQUIRE_LOGIN,
 ];
 
@@ -373,7 +373,7 @@ pub const KEYS_BUILDIN_SETTINGS: &[&str] = &[
     OPTION_ALLOW_COMMAND_LINE_SETTINGS_WHEN_SETTINGS_DISABLED,
 ];
 
-// AnmesonDesk: the login gate's one read of its own switch.
+// TraceMote: the login gate's one read of its own switch.
 //
 // `option2bool` is not usable here. Its fallback arm is `value != "N"`, so an
 // *unset* `require-login` would read as **true** and gate a stock build. The

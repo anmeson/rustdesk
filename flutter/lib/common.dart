@@ -2342,7 +2342,7 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
     }
   }
   if (type != null && id != null) {
-    // AnmesonDesk: uni-links and `--connect` do **not** go through `connect()`
+    // TraceMote: uni-links and `--connect` do **not** go through `connect()`
     // -- every case below calls `rustDeskWinManager` directly -- so the guard
     // there does not cover them. Refuse the link and ask for a sign-in; the
     // user re-initiates afterwards. Returning false lets the main window show,
@@ -2591,7 +2591,7 @@ connect(BuildContext context, String id,
     String? connToken,
     bool? isSharedPassword}) async {
   if (id == '') return;
-  // AnmesonDesk: refuse to start a session while `require-login` is on and
+  // TraceMote: refuse to start a session while `require-login` is on and
   // nobody is signed in. This is UX, **not** enforcement -- it guards the
   // buttons in this process and nothing else; a patched client skips it. The
   // security boundary is `hbbs`, which authorizes every connection (T3.3).

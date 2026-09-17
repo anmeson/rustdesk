@@ -143,7 +143,7 @@ void runMainApp(bool startService) async {
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
   gFFI.userModel.refreshCurrentUser();
   runApp(App());
-  // AnmesonDesk: hold at the login dialog when `require-login` is on. After
+  // TraceMote: hold at the login dialog when `require-login` is on. After
   // runApp, because the dialog needs the overlay that the first frame builds;
   // the ordering above it is upstream's and is left alone.
   WidgetsBinding.instance.addPostFrameCallback((_) => runLoginGate());

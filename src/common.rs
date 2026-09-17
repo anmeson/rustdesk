@@ -2324,7 +2324,7 @@ pub fn read_custom_client(config: &str) {
         log::error!("Failed to decode custom client config");
         return;
     };
-    // AnmesonDesk: which signing authority a `custom.txt` has to carry.
+    // TraceMote: which signing authority a `custom.txt` has to carry.
     //
     // Upstream's key is Purslane's and we do not hold its private half, so a
     // `custom.txt` *we* write is rejected at the `sign::verify` below --
@@ -2332,12 +2332,12 @@ pub fn read_custom_client(config: &str) {
     // client config`. That is what makes T6.2's "bake the branding with no
     // source change" impossible for this fork, and this is the one line that
     // makes the rest of upstream's mechanism ours. Build with
-    // `ANMESON_CUSTOM_PK` set to the base64 public key whose private half
+    // `TRACEMOTE_CUSTOM_PK` set to the base64 public key whose private half
     // signed the config (`tools/custom-client.py`).
     //
     // Unset, this is byte-for-byte upstream's key and an upstream-signed
     // config still verifies: a stock build stays a stock build.
-    const KEY: &str = match option_env!("ANMESON_CUSTOM_PK") {
+    const KEY: &str = match option_env!("TRACEMOTE_CUSTOM_PK") {
         Some(k) => k,
         None => "5Qbwsde3unUcJBtrx9ZkvUmwFNoExHzpryHuPUdqlWM=",
     };

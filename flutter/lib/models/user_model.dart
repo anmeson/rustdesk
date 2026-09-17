@@ -146,7 +146,7 @@ class UserModel {
     userName.value = '';
     displayName.value = '';
     avatar.value = '';
-    // AnmesonDesk: the token is gone, so the gate closes again. Every logout
+    // TraceMote: the token is gone, so the gate closes again. Every logout
     // lands here -- the Logout button, and the 401 reset when a session
     // expires. The service is told separately, by the Rust-side hook on the
     // `access_token` write above. Not awaited: no caller of reset() wants to

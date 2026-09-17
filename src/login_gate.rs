@@ -1,4 +1,4 @@
-// AnmesonDesk login gate -- the state the `require-login` switch acts on.
+// TraceMote login gate -- the state the `require-login` switch acts on.
 //
 // Registration runs in the service process (root/SYSTEM), which resolves to a
 // different config directory than the GUI (`hbb_common::config::patch`) and so
@@ -24,7 +24,7 @@ use hbb_common::{config::LocalConfig, log};
 // the service process, is not settable through custom.txt, and is not a
 // user-facing option. The keys crate is the import path for *options*; this is
 // internal state that happens to use the same file.
-const OPTION_LOGIN_STATE: &str = "anmeson-login-state";
+const OPTION_LOGIN_STATE: &str = "tracemote-login-state";
 
 /// Whether a user was signed in on this device, as last reported by the GUI.
 ///

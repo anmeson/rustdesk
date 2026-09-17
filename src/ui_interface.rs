@@ -247,7 +247,7 @@ pub fn get_builtin_option(key: &str) -> String {
 #[inline]
 pub fn set_local_option(key: String, value: String) {
     LocalConfig::set_option(key.clone(), value.clone());
-    // AnmesonDesk: the account token *is* the login state, and the service
+    // TraceMote: the account token *is* the login state, and the service
     // cannot see it. Hooked here rather than in `LocalConfig::set_option`,
     // which would catch every path but lives in the hbb_common submodule.
     // A no-op with `require-login` off. See src/login_gate.rs.

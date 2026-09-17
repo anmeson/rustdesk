@@ -556,7 +556,7 @@ pub enum Data {
         hotx: i32,
         hoty: i32,
     },
-    // AnmesonDesk: GUI -> service, "a user is signed in on this device" (or is
+    // TraceMote: GUI -> service, "a user is signed in on this device" (or is
     // not, on logout). One bit; the account token never crosses this boundary.
     // Appended, never inserted -- `Data` is `#[serde(tag="t", content="c")]`, so
     // a new variant is wire-compatible both ways, but only while the existing
@@ -1990,7 +1990,7 @@ pub async fn notify_deployed() -> ResultType<()> {
     Ok(())
 }
 
-// AnmesonDesk: tell the service a user signed in or out. Modelled on
+// TraceMote: tell the service a user signed in or out. Modelled on
 // `notify_deployed` above, down to the timeout.
 #[tokio::main(flavor = "current_thread")]
 pub async fn notify_login_state(logged_in: bool) -> ResultType<()> {
@@ -2252,7 +2252,7 @@ mod test {
         assert!(std::mem::size_of::<Data>() <= 120);
     }
 
-    // AnmesonDesk: `Data` is `#[serde(tag = "t", content = "c")]`, which is what
+    // TraceMote: `Data` is `#[serde(tag = "t", content = "c")]`, which is what
     // makes appending `LoginState` wire-compatible in both directions -- an old
     // peer sees an unknown tag and fails that one message rather than
     // misreading a neighbouring variant, as a positional encoding would. This

@@ -301,7 +301,7 @@ impl OidcSession {
                     if !session.is_current_auth_attempt(auth_attempt) {
                         return;
                     }
-                    // AnmesonDesk: set when the token below is stored, so the
+                    // TraceMote: set when the token below is stored, so the
                     // service can be told after OIDC_SESSION's write guard is
                     // dropped -- an IPC round-trip must not run under it.
                     #[cfg(not(target_os = "ios"))]
@@ -330,7 +330,7 @@ impl OidcSession {
                     }
                     session.set_state(LOGIN_ACCOUNT_AUTH, "".to_owned());
                     session.auth_body = Some(auth_body);
-                    // AnmesonDesk: OIDC writes the token here instead of going
+                    // TraceMote: OIDC writes the token here instead of going
                     // through `ui_interface::set_local_option`, so this is the
                     // second of the gate's two hooks. See src/login_gate.rs.
                     #[cfg(not(target_os = "ios"))]

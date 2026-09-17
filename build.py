@@ -55,7 +55,7 @@ def system2(cmd):
         sys.exit(-1)
 
 
-# --- AnmesonDesk patch B7 -------------------------------------------------
+# --- TraceMote patch B7 -------------------------------------------------
 # Forward our build-time stamp to every `flutter build` this script runs.
 #
 # Upstream's calls below are bare `flutter build <platform> --release`, and
@@ -65,10 +65,10 @@ def system2(cmd):
 # "unreleased local build" and names no commit. That compiles, runs, passes
 # tests, and is an AGPL compliance failure (docs/LICENSING.md §5).
 #
-# Deliberately a fixed allow-list rather than "export anything ANMESON_*": a
+# Deliberately a fixed allow-list rather than "export anything TRACEMOTE_*": a
 # build script that copies arbitrary environment into the shipped binary is a
 # way to leak a secret by accident.
-ANMESON_DART_DEFINES = ('ANMESON_SOURCE_COMMIT', 'ANMESON_SOURCE_DATE')
+TRACEMOTE_DART_DEFINES = ('TRACEMOTE_SOURCE_COMMIT', 'TRACEMOTE_SOURCE_DATE')
 
 
 def dart_defines():
@@ -79,7 +79,7 @@ def dart_defines():
     one's, to insist they are present.
     """
     return ''.join(f' --dart-define={k}={os.environ[k]}'
-                   for k in ANMESON_DART_DEFINES if os.environ.get(k))
+                   for k in TRACEMOTE_DART_DEFINES if os.environ.get(k))
 # --- end B7 ---------------------------------------------------------------
 
 

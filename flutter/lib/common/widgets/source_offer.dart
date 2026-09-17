@@ -1,4 +1,4 @@
-// AnmesonDesk AGPL notices -- the modification notice, the licence, and the
+// TraceMote AGPL notices -- the modification notice, the licence, and the
 // offer of corresponding source, as they appear in About.
 //
 // **This is the one patch that is deliberately not behind `require-login`.**
@@ -17,14 +17,14 @@
 /// Public, unauthenticated, and verified as such -- if either of these ever
 /// stops answering to a logged-out visitor, the offer is broken and the
 /// distribution is out of compliance. Re-check at every release (T6.4).
-const String kClientSourceUrl = 'https://github.com/anmeson/rustdesk';
-const String kServerSourceUrl = 'https://github.com/anmeson/rustdesk-server';
+const String kClientSourceUrl = 'https://github.com/tracemote/rustdesk';
+const String kServerSourceUrl = 'https://github.com/tracemote/rustdesk-server';
 
 /// The commit the binary was built from, stamped in at build time:
 ///
 /// ```
 /// flutter build macos --release \
-///   --dart-define=ANMESON_SOURCE_COMMIT=$(git rev-parse HEAD)
+///   --dart-define=TRACEMOTE_SOURCE_COMMIT=$(git rev-parse HEAD)
 /// ```
 ///
 /// A `--dart-define` rather than an FFI constant because the Rust side has no
@@ -40,20 +40,20 @@ const String kServerSourceUrl = 'https://github.com/anmeson/rustdesk-server';
 /// that is the release gate in docs/LICENSING.md, because "the source is on
 /// GitHub somewhere" is not corresponding source.
 const String kSourceCommit =
-    String.fromEnvironment('ANMESON_SOURCE_COMMIT', defaultValue: '');
+    String.fromEnvironment('TRACEMOTE_SOURCE_COMMIT', defaultValue: '');
 
 /// The date this build's modifications carry, for AGPL §5(a) ("prominent
 /// notices stating that you modified it, and giving a relevant date").
 /// Stamped the same way; falls back to the empty string, and the notice then
 /// leans on the Build Date already shown two lines above it.
 const String kSourceDate =
-    String.fromEnvironment('ANMESON_SOURCE_DATE', defaultValue: '');
+    String.fromEnvironment('TRACEMOTE_SOURCE_DATE', defaultValue: '');
 
 /// Who modified it. Not a legal entity name -- it is the GitHub organisation
 /// that actually hosts the source above, which is the fact a user needs to
 /// follow the offer. docs/LICENSING.md carries the open question of what the
 /// registered name should be here before the first public binary.
-const String kModifierName = 'Anmeson';
+const String kModifierName = 'TraceMote';
 
 /// The §5(a) modification notice.
 String get modificationNotice {

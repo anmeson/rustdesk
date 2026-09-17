@@ -8,7 +8,7 @@
 // how a release is built:
 //
 //   flutter test test/source_offer_test.dart \
-//     --dart-define=ANMESON_SOURCE_COMMIT=deadbeef --dart-define=ANMESON_SOURCE_DATE=2026-09-15
+//     --dart-define=TRACEMOTE_SOURCE_COMMIT=deadbeef --dart-define=TRACEMOTE_SOURCE_DATE=2026-09-15
 //
 // Undefined, the two stamped tests are skipped rather than asserting the
 // fallback -- a green run here must not be read as "the release build is
@@ -43,7 +43,7 @@ void main() {
 
     test('the URLs are public https, not ssh or a placeholder', () {
       for (final url in [kClientSourceUrl, kServerSourceUrl]) {
-        expect(url, startsWith('https://github.com/anmeson/'));
+        expect(url, startsWith('https://github.com/tracemote/'));
         expect(url, isNot(contains('example')));
       }
     });
@@ -57,7 +57,7 @@ void main() {
 
     test('a stamped build carries the commit', () {
       if (kSourceCommit.isEmpty) {
-        markTestSkipped('ANMESON_SOURCE_COMMIT not defined');
+        markTestSkipped('TRACEMOTE_SOURCE_COMMIT not defined');
         return;
       }
       expect(sourceOfferNotice, contains(kSourceCommit));
@@ -66,7 +66,7 @@ void main() {
 
     test('a stamped date reaches the modification notice', () {
       if (kSourceDate.isEmpty) {
-        markTestSkipped('ANMESON_SOURCE_DATE not defined');
+        markTestSkipped('TRACEMOTE_SOURCE_DATE not defined');
         return;
       }
       expect(modificationNotice, contains(kSourceDate));

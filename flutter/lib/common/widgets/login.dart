@@ -973,7 +973,7 @@ Future<bool?> _openLoginDialog() async {
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // AnmesonDesk: say why this dialog keeps coming back. Inert with
+          // TraceMote: say why this dialog keeps coming back. Inert with
           // `require-login` off, so an ungated build renders upstream's dialog.
           if (requireLogin && !gFFI.userModel.isLogin)
             Text(

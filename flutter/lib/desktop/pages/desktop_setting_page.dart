@@ -2496,7 +2496,7 @@ class _AboutState extends State<_About> {
                     translate('Website'),
                     style: linkStyle,
                   ).marginSymmetric(vertical: 4.0)),
-              // AnmesonDesk: the AGPL notices -- modification (§5a), licence,
+              // TraceMote: the AGPL notices -- modification (§5a), licence,
               // and the offer of corresponding source (§6/§13). Placed above
               // upstream's copyright box, which is left exactly as it was:
               // §5(a) says add notices, not replace theirs. Not behind

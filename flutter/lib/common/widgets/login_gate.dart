@@ -1,4 +1,4 @@
-// AnmesonDesk login gate -- the user-facing half.
+// TraceMote login gate -- the user-facing half.
 //
 // This is **not** an enforcement point and cannot be one: it runs inside the
 // process it is protecting, so a patched client simply does not call it. It
