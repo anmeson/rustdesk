@@ -255,7 +255,7 @@ tokio = { version = "1.44", features = ["test-util"] }
 
 [package.metadata.bundle]
 name = "RustDesk"
-identifier = "com.carriez.rustdesk"
+identifier = "com.tracemote.desk"
 icon = ["res/32x32.png", "res/128x128.png", "res/128x128@2x.png"]
 osx_minimum_system_version = "12.3"
 
