@@ -69,8 +69,9 @@ Update this block on every upstream merge, and re-verify every entry below.
 *ones that have landed are rows below, the rest are still under **Planned**.*
 *Rows prefixed `B` are **build patches** — B1–B6 landed in T0.3 to make the*
 *client compile at all on a current macOS toolchain, B7 in T6.4 to make a*
-*release build identifiable, B8 in T6.7 to give the app its own identity, and*
-*B9 in T6.7 to give it its own name.*
+*release build identifiable, B8 in T6.7 to give the app its own identity,*
+*B9 in T6.7 to give it its own name, and B11 in T6.7 to give the Windows*
+*executable that name too. (B10, the Linux name, is still **Planned**.)*
 *Rows prefixed `L` are **licence***
 ***patches** (T6.1) — the only ones not behind `require-login`, deliberately.*
 *Rows prefixed `C` are **branding patches** (T6.2), which run before any option*
@@ -87,6 +88,7 @@ Update this block on every upstream merge, and re-verify every entry below.
 | B7 | applied 2026-09-16 | `build.py` (`dart_defines()` after `system2`, `:58-83`; the four `flutter build` call sites, `:733`, `:937`, `:952`, `:965`) | forward `TRACEMOTE_SOURCE_COMMIT` / `TRACEMOTE_SOURCE_DATE` from the environment as `--dart-define` on every `flutter build` | upstream's calls are bare `flutter build <platform> --release`, so a release built through `build.py` — which is how upstream's CI builds every platform — silently ships an unstamped binary and an AGPL failure (T6.4) | Isolated | ⚠ medium — four separate call sites; a new platform branch upstream adds will not have it |
 | B8 | applied 2026-09-17 | `Cargo.toml` (`:258`); `flutter/macos/Runner.xcodeproj/project.pbxproj` (`:448`, `:593`, `:630` — Profile, Debug, Release) | bundle identifier `com.carriez.rustdesk` → `com.tracemote.desk` | upstream's identifier is upstream's: shipped as-is, a TraceMote install and a stock RustDesk install collide on one Mac — same LaunchServices registration, same preferences domain, same TCC grants. And TCC is why this could not wait (T6.7) | Isolated | ⚠ medium — three pbxproj sites that B2 already marks churny, and **`src/platform/macos.rs:308` must keep the literal `com.carriez.rustdesk`**: it is the search pattern `correct_app_name()` rewrites to the runtime bundle id, not a value |
 | B9 | applied 2026-09-17 | `flutter/macos/Runner/Configs/AppInfo.xcconfig` (`:8`); `flutter/macos/Runner/Base.lproj/MainMenu.xib` (`:16`, `:333`); `flutter/macos/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme` (4 × `BuildableName`); `build.py` (`:937`); `flutter/windows/runner/Runner.rc` (`:93`, `:98`) | bundle **name** `RustDesk` → `TraceMote`: `PRODUCT_NAME`, the Swift module name the XIB resolves its classes through, the scheme's product name, `build.py`'s post-build `service` copy, and the Windows version resource's `ProductName` / `FileDescription` | B8 gave the app its own *identifier*; this gives it the name a user sees. `PRODUCT_NAME` reaches `CFBundleName` (menu bar, Finder, Dock) **and** `CFBundleExecutable`, and `src/platform/macos.rs` assumes `Contents/MacOS/<app-name>` in five places — so the macOS service install was broken by the mismatch, not merely mislabelled (T6.7) | Isolated | ⚠ medium — `PRODUCT_NAME` **must** stay equal to `branding.json`'s `app-name`, and `build.py:937` hardcodes the resulting `.app` name, so the two move together or the `service` copy silently misses the bundle |
+| B11 | applied 2026-09-18 | `flutter/windows/CMakeLists.txt` (`:7`); `flutter/windows/runner/Runner.rc` (`:95`, `:97`); `build.py` (`:973`, `:983-985`); `libs/portable/Cargo.toml` (`:29-31`) | Windows **executable** `rustdesk.exe` → `TraceMote.exe`: `BINARY_NAME`, the version resource's `InternalName` / `OriginalFilename`, the portable packer's startup-file argument and its output name (`tracemote-<version>-install.exe`), and the packer's own version resource | B9 renamed the macOS bundle and the Windows version resource but left `BINARY_NAME`, so Windows shipped `rustdesk.exe` whose Properties said TraceMote. **That mismatch breaks the EXE install, not just the label** — `install_me` copies the bundle with `XCOPY`, which preserves filenames, while every path it writes is `{app_name}.exe` (T6.7) | Isolated | ⚠ medium — `BINARY_NAME` **must** stay equal to `branding.json`'s `app-name`, same coupling B9 carries; `build.py:973` hardcodes the resulting filename, so the two move together or the portable pack fails on a missing startup file |
 | P1 | applied 2026-09-15 | `libs/base/src/config/keys.rs` (`:183-185`, `:333-334`, `:376-392`) | `OPTION_REQUIRE_LOGIN = "require-login"`, appended to `KEYS_SETTINGS`, plus a `require_login()` helper | login gate — the single switch every other patch reads (T4.1) | Isolated | low — `libs/base` is client-only; the key lists near `:193+` get reordered, so append |
 | P5 | applied 2026-09-15 | **new** `src/login_gate.rs`; `src/lib.rs` (`:18-19`); `src/ipc.rs` (`Data::LoginState` `:559-564`, handler `:1057-1059`, `notify_login_state` `:1993-1999`, test `:2255-2275`) | one bit — "a user is signed in" — from the GUI to the service, and the service-side state the gate reads | login gate — T4.3 cannot work without it (T4.2) | Isolated | ⚠ medium — `Data` variants are added upstream often; append at the end, never insert |
 | P4 | applied 2026-09-15 | `src/rendezvous_mediator.rs` (`start_all`, `:217-224`); `libs/base/src/config/keys.rs` (`is_require_login` + its test) | `&& !crate::login_gate::is_blocked()` joined to the existing `stop-service` early-out | login gate — an unauthenticated device does not announce itself to `hbbs` (T4.3) | Structural | ⚠ **high** — `start_all` is core startup and changes often |
@@ -192,18 +194,30 @@ check.
   (`ast`: `Expr(Constant(str))`). The DMG is really built by
   `.github/workflows/client-release.yml`, which is ours and is updated. Editing
   a dead upstream string adds merge surface for no effect.
-- **`Runner.rc`'s `InternalName` / `OriginalFilename`** stay `rustdesk` /
+- **`Runner.rc`'s `InternalName` / `OriginalFilename`** stayed `rustdesk` /
   `rustdesk.exe`, because `flutter/windows/CMakeLists.txt`'s `BINARY_NAME` still
-  produces that filename and those two fields are supposed to describe the file
-  as built. `CompanyName` and `LegalCopyright` stay upstream's (LICENSING.md
+  produced that filename and those two fields are supposed to describe the file
+  as built. **Superseded by B11**, which renames `BINARY_NAME` and moves these
+  two with it. `CompanyName` and `LegalCopyright` stay upstream's (LICENSING.md
   rule 4; revisit with a signing identity in T6.5).
-- **Windows `BINARY_NAME`.** It does not need renaming: `get_install_info_with_subkey()`
-  (`src/platform/windows.rs:1462`) names the *installed* executable
-  `{app_name}.exe` and `get_default_install_path()` (`:1404`) names the install
-  directory from `get_app_name()`, so the shipped product is already
-  `C:\Program Files\TraceMote\TraceMote.exe`. Only the build-output filename is
-  upstream's, and renaming it would also have to move `build.py:1057`'s
-  portable-pack argument.
+- **Windows `BINARY_NAME`.** ~~It does not need renaming~~ — **this bullet was
+  wrong, and B11 corrects it.** `get_install_info_with_subkey()`
+  (`src/platform/windows.rs:1462`) does name the *installed* executable
+  `{app_name}.exe`, but that is the path the installer **writes into the registry
+  and the shortcuts**, not a path it creates. Nothing renames the file on a first
+  install: `install_me` (`:1585`; its command block `:1724-1767`) emits `{copy_exe}` and
+  **no `{rename_exe}`**,
+  and `copy_exe_cmd` → `copy_raw_cmd` (`:1466`) is an `XCOPY` of the whole bundle
+  directory, which preserves filenames. So the shipped product was
+  `C:\Program Files\TraceMote\rustdesk.exe` while `DisplayIcon`,
+  `UninstallString`, the Start-menu shortcut, the desktop shortcut and the tray
+  autostart shortcut all pointed at `…\TraceMote.exe`, which did not exist.
+  **Upstream never sees this** because its two names differ only in case
+  (`rustdesk.exe` vs `RustDesk.exe`) and NTFS is case-insensitive; `TraceMote.exe`
+  is a genuinely different filename. `update_me` (`:3556`) *does* call
+  `rename_exe_cmd`, so an in-app update would have repaired the install that the
+  first install broke. The `build.py` portable-pack argument does move with it,
+  as this bullet said — B11 moves it.
 - **The MSI** (`res/msi/`). Not on our release path — `build.py` never invokes
   it — and `res/msi/preprocess.py` already takes `--app-name` as a flag
   (defaulting to `RustDesk`). **When MSI packaging arrives in T6.5, it must be
@@ -217,6 +231,67 @@ resolution (forced by the module rename, and reverting it is what would break);
 version resource, which is metadata only and reaches no code path. Nothing
 behind `require-login`, and nothing on a connect path. **Not built or launched
 on this host** — no Flutter toolchain; the first CI run is the verification.
+
+### Notes on the `B11` row (Windows — the executable name)
+
+**`BINARY_NAME` is the whole patch; the other three files follow from it.**
+`flutter/windows/CMakeLists.txt:7` is the single line that decides the output
+filename — `runner/CMakeLists.txt` uses `${BINARY_NAME}` as the target name and
+`:78` derives `BUILD_BUNDLE_DIR` from `$<TARGET_FILE_DIR:${BINARY_NAME}>`, so the
+bundle layout follows automatically. `project(rustdesk …)` at `:3` is the CMake
+*project* name and reaches no output path; it stays.
+
+**Why this is a bug fix and not a label.** See the corrected B9 bullet above for
+the mechanism. Three code paths were looking for `TraceMote.exe` beside a file
+called `rustdesk.exe`:
+
+| Where | What it does with `{app_name}.exe` | Before B11 |
+|---|---|---|
+| `windows.rs:1462` `get_install_info_with_subkey` | the `exe` every install path writes — `DisplayIcon`, `UninstallString`, all three shortcuts, `get_after_install`, `get_import_config` | pointed at a file that did not exist |
+| `windows.rs:3553` `update_me` | `taskkill /F /IM {app_name}.exe` before overwriting | matched no process; the running client was never killed |
+| `windows.rs:3414` `update_me` | `get_pids_of_process_with_args("{app_name}.exe")` | empty, so `_restore_session_guard` restored no tray |
+
+**Not verified on Windows** — no Windows host and no Flutter toolchain here, and
+the Windows CI job has never run (`client-release.yml` marks it *NEVER RUN*).
+This is read from the source, which is exactly how the B9 bullet it corrects got
+it wrong. Treat the table above as the thing to check first on the first real
+Windows install.
+
+**The portable packer needed one argument and gets a better temp directory free.**
+`build.py:973` passes `-e …/rustdesk.exe` explicitly, so it had to move or the
+pack would fail on a missing startup file; `generate.py`'s own default (`:127`,
+still `rustdesk.exe`) is left upstream's, because every call we make passes `-e`.
+`libs/portable/src/main.rs:29` `app_dir_name()` derives the extraction directory
+from the packed executable's stem, so the self-extractor now unpacks to
+`%TEMP%\tracemote\` instead of sharing `rustdesk` with a stock install. That is
+upstream's own code doing the right thing; no patch there.
+
+**Deliberately left alone:**
+
+- **`librustdesk.dll`** (`CMakeLists.txt:106-108`). `runner/main.cpp:26` loads it
+  by that literal name and `Cargo.toml` produces it; renaming means moving both
+  plus every other platform's copy step, for a file no user looks at.
+- **`generate.py`'s `-e` default** and `libs/portable/src/bin_reader.rs`'s test
+  fixtures, which name `rustdesk.exe` in synthetic blobs and assert nothing about
+  the real build.
+- **`windows.rs:1257`** `portable_service_logon_helper_paths`, which hardcodes
+  `rustdesk.exe` under `#[cfg(not(feature = "flutter"))]` — the Sciter build we
+  do not ship.
+- **`RuntimeBroker_rustdesk.exe`** (`win_topmost_window.rs:33`, `main.rs:315`,
+  `res/msi/`). It is a copy of Windows' own `RuntimeBroker.exe` under a marker
+  name, not our executable, and the name is matched by three separate
+  cleanup paths.
+- **`res/msi/`**. Still not on our release path, and `preprocess.py` still takes
+  `--app-name`; B9's warning stands and now has a second half — **T6.5 must pass
+  `--app-name TraceMote`**, and the MSI must install the binary as
+  `TraceMote.exe`, which is now what the build produces.
+- **`CompanyName` / `LegalCopyright`** in both `.rc` resources, per LICENSING.md
+  rule 4.
+
+**Regression surface.** The output filename (unavoidable — it is the patch), the
+two version-resource fields that describe it, the portable pack's input and
+output names, and the self-extractor's temp directory. Nothing behind
+`require-login`, nothing on a connect path, and nothing on macOS or Linux.
 
 ### Notes on the `B10` row (Linux — planned, NOT part of B9)
 
