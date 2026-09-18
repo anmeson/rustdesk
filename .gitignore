@@ -17,6 +17,11 @@ cert.pfx
 *png
 *svg
 *jpg
+# TraceMote (C2): upstream ignores *png/*svg wholesale, so a brand asset
+# added to a directory that already existed is silently never committed.
+# Everything else this repo ships was already tracked before line 17.
+!flutter/assets/logo_light.png
+!flutter/assets/logo_dark.png
 sciter.dll
 **pdb
 src/bridge_generated.rs

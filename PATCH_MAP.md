@@ -74,8 +74,9 @@ Update this block on every upstream merge, and re-verify every entry below.
 *executable that name too. (B10, the Linux name, is still **Planned**.)*
 *Rows prefixed `L` are **licence***
 ***patches** (T6.1) — the only ones not behind `require-login`, deliberately.*
-*Rows prefixed `C` are **branding patches** (T6.2), which run before any option*
-*is readable and so cannot be flagged either.*
+*Rows prefixed `C` are **branding patches** — C1 (T6.2) runs before any option*
+*is readable and so cannot be flagged either; C2 (T6.7) is artwork, which no*
+*flag could gate.*
 
 | # | Status | File | What changed | Why | Type | Upstream dependency |
 |---|---|---|---|---|---|---|
@@ -99,6 +100,67 @@ Update this block on every upstream merge, and re-verify every entry below.
 | P6 | applied 2026-09-15 | `src/lang/template.rs`, `src/lang/en.rs`, and every other `src/lang/*.rs` (54 files, 1 line each); `flutter/lib/common/widgets/login.dart` (dialog content `:975-983`, import `:16`) | one key, `require_login_tip`, and the guarded `Text` that renders it | login gate — says why the dialog cannot be dismissed (T4.7) | Isolated | low per file, but **54 files append to the same list** — expect a conflict here every release |
 | L1 | applied 2026-09-15 | **new** `flutter/lib/common/widgets/source_offer.dart`; **new** `flutter/test/source_offer_test.dart`; `flutter/lib/desktop/pages/desktop_setting_page.dart` (import `:11`, `_AboutState` `:2499-2519`) | the AGPL notices in About — modification notice (§5a), licence, and the offer of corresponding source with the commit this binary was built from | AGPL source-availability; shipping a modified client without them is the compliance failure (T6.1) | Isolated | ⚠ medium — an additive hunk in upstream's `_AboutState` column, and **unconditional**: no flag switches it off |
 | C1 | applied 2026-09-15 | `src/common.rs` (`read_custom_client`, `:2327-2343`); `build.rs` (`:105-109`) | the `custom.txt` trust anchor read from `TRACEMOTE_CUSTOM_PK` at compile time, upstream's key as the fallback | upstream signs `custom.txt` with a key we do not have, so a config we write is discarded — this is the whole of T6.2 | Isolated | ⚠ medium — upstream owns the const and could move or rename it; a merge that drops this row silently reverts every branded build to trusting Purslane |
+| C2 | applied 2026-09-19 | **artwork, 14 files** — `res/icon.png`, `res/mac-icon.png`, `res/{32x32,64x64,128x128,128x128@2x}.png`, `res/icon.ico`, `res/scalable.svg`, `res/mac-tray-dark-x2.png`, `res/tray-icon.ico`, `flutter/macos/Runner/AppIcon.icns`, `flutter/windows/runner/resources/app_icon.ico`, `flutter/assets/icon.svg`; **new** `flutter/assets/logo_{light,dark}.png`; `.gitignore` (`:20-24`); **deleted** `res/gen_icon.sh` | every icon replaced with TraceMote artwork, all of it generated from `brand/logo-full.svg` (and `brand/logo-mini.svg` at 32px and below) by `scripts/gen-brand-assets.py`. **Regenerated 2026-09-19 from the drawn Figma SVGs**, which replaced the placeholder raster masters — same fourteen paths, new bytes. `AppIcon.icns` gains Apple's other six types; the Windows `.ico` goes from a single 48 to 16→256; the macOS tray becomes a monochrome template rather than the logo | the last of T6.7's icon work — every build before this shipped upstream's RustDesk art under our name, including the Windows installer (`libs/portable/build.rs` reads `res/icon.ico`) | Isolated | low — **no code changes at all**, only bytes at paths upstream already owns. The three things a merge can break are listed below |
+
+### Notes on the `C2` row
+
+**Why this is `Isolated` despite touching fourteen files.** Not one of them is
+code. Every path already existed and was already read by upstream's own build,
+so a merge conflict here can only be "upstream also changed the artwork", which
+`git checkout --ours` resolves. Regenerate with
+`python3 scripts/gen-brand-assets.py` rather than by hand.
+
+**Three things that can go wrong at a merge, none of them textual:**
+
+1. **`.gitignore:17-19` ignores `*png`, `*svg` and `*jpg` across the whole
+   fork.** Every other icon predates that rule and is already tracked, so
+   *edits* behave normally — which is exactly why this bites. The two new
+   `flutter/assets/logo_*.png` are un-ignored by name at `:20-24`. If a merge
+   takes upstream's `.gitignore` wholesale, those two files vanish from the
+   index while staying on disk, and the next clean checkout builds an app with
+   a blank home page and no error anywhere.
+
+2. **`flutter/assets/icon.png` must not exist.** `pubspec.yaml:156` bundles
+   `assets/` wholesale, and *two* consumers prefer that path — `tray.rs:301`
+   over its embedded bytes, and `loadIcon()` at `common.dart:3840` over
+   `icon.svg`. Upstream adding it would silently replace the macOS tray
+   template with a colour icon, which renders as a dark blob. The generator
+   exits non-zero if the file is present; that check is the guard.
+
+3. **`AppIcon.icns` is built from `res/mac-icon.png`, not `res/icon.png`.**
+   The two are deliberately different — macOS art occupies 824 of its 1024
+   canvas and leaves the rest as margin. Regenerating the `.icns` from the
+   full-bleed file gives a Dock icon noticeably larger than every app beside
+   it, which looks like a rendering bug rather than a wrong input.
+
+**Unverified.** These are correct as files — sizes, container types and the
+`.icns` type list were all read back after writing. **No client has been built
+with them on any platform**, so T6.7's steps 7–9 (docs/ASSETS.md §9) are still
+open, and the one on Windows would be the first Windows build this project has
+ever done.
+
+**Small sizes come from a second master.** The full mark does not read at
+16×16 — its two panels and arrow merge — so `brand/logo-mini.svg` (the same
+tile, panels dropped, arrow enlarged) drives everything at 32px and below, and
+the full mark everything from 48 up. `size` always means *physical* pixels
+there, so a 16pt @2x icon is 32 and gets the arrow.
+
+That boundary was 20 under the placeholder artwork and is 32 under the drawn
+SVGs, whose strokes are thinner relative to the tile. It is measured, not
+assumed — re-measure it if the artwork changes again.
+
+The `.icns` needs its own path for this (`mac_tile_at`), because Apple's icons
+carry a margin and building the set by scaling one large render down put the
+unreadable full mark into `ic04` — the type the Finder list view draws. A
+merge that reverts `gen_icns` to a single-source loop reintroduces exactly
+that, and it is invisible unless someone opens a Finder list view.
+docs/ASSETS.md §1 has the table.
+
+**The drawn tile is a ring around nothing.** `res/tray-icon.ico` and every app
+icon rely on the `#0B1220` fill the generator paints inside it (`tiled()`);
+without that the white arrow sits on whatever the taskbar or Dock is showing.
+The bare mark — `logo_{light,dark}.png` here, the site header outside the
+fork — deliberately does not get it.
 
 ### Note on the TraceMote rename (2026-09-17)
 
