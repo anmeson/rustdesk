@@ -455,6 +455,14 @@ jobs:
         # launcher-name checks and still asserts LICENCE, the service binary,
         # the AGPL stamp and the trust anchor. Those four are all compile-time,
         # which means THIS is the job that can still do something about them.
+        env:
+          # WITHOUT THIS the script defaults to `release` stage and runs the
+          # signature check -- which cannot pass here, because the step above
+          # just broke the seal Xcode wrote by copying LICENCE in. Linux and
+          # Windows survive the omission (that check is macOS-only) so the
+          # first green run did not reveal it; macOS would have failed after
+          # ~36 minutes on arm64 and ~68 on Intel.
+          TRACEMOTE_VERIFY_STAGE: compile
         run: ./scripts/release-verify.sh flutter/build/macos/Build/Products/Release/TraceMote.app
 
       - name: Tar the unsigned bundle
@@ -556,6 +564,14 @@ jobs:
         run: cp LICENCE "$BUNDLE/LICENCE"
 
       - name: Verify what can be verified without the config
+        env:
+          # WITHOUT THIS the script defaults to `release` stage and runs the
+          # signature check -- which cannot pass here, because the step above
+          # just broke the seal Xcode wrote by copying LICENCE in. Linux and
+          # Windows survive the omission (that check is macOS-only) so the
+          # first green run did not reveal it; macOS would have failed after
+          # ~36 minutes on arm64 and ~68 on Intel.
+          TRACEMOTE_VERIFY_STAGE: compile
         run: ./scripts/release-verify.sh flutter/build/linux/x64/release/bundle
 
       - name: Tar the bundle
@@ -663,6 +679,14 @@ jobs:
         run: cp LICENCE "$BUNDLE/LICENCE"
 
       - name: Verify what can be verified without the config
+        env:
+          # WITHOUT THIS the script defaults to `release` stage and runs the
+          # signature check -- which cannot pass here, because the step above
+          # just broke the seal Xcode wrote by copying LICENCE in. Linux and
+          # Windows survive the omission (that check is macOS-only) so the
+          # first green run did not reveal it; macOS would have failed after
+          # ~36 minutes on arm64 and ~68 on Intel.
+          TRACEMOTE_VERIFY_STAGE: compile
         run: ./scripts/release-verify.sh flutter/build/windows/x64/runner/Release
 
       - name: Tar the unpacked Release tree
