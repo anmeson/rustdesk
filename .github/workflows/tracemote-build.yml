@@ -762,7 +762,28 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { path: dist, merge-multiple: true }
-      - run: ls -la dist/
+
+      - name: Keep only the release assets
+        # `merge-multiple` flattens EVERY artifact of the run into one directory
+        # -- which includes the `bridge` artifact, five generated files that are
+        # build intermediates and not release assets. Run 35449901129 attached
+        # bridge_generated.rs, generated_bridge.dart and three more to
+        # client-v0.2.0 before this step existed.
+        #
+        # An allowlist, not `rm` of the known-bad: the private pipeline treats
+        # this release as its input, and anything new that appears in dist/
+        # would otherwise leak straight through to the signed draft release.
+        run: |
+          mkdir -p release
+          for f in dist/tracemote-*-unsigned.tar.gz dist/build-stamp.txt; do
+            [ -f "$f" ] && mv "$f" release/
+          done
+          echo "attaching:"; ls -la release/
+          echo "dropped:";   ls -la dist/ 2>/dev/null || true
+          # Four platforms plus the stamp. Fewer means a build job produced
+          # nothing and this would publish a partial release.
+          n=$(find release -type f | wc -l | tr -d ' ')
+          [ "$n" = 5 ] || { echo "::error::expected 5 assets, found $n"; exit 1; }
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -785,4 +806,4 @@ jobs:
             If you are looking for the TraceMote client, these will not work.
             If you are exercising your AGPL §6(d) rights, the corresponding
             source is this repository at the commit above.
-          files: dist/**
+          files: release/**
