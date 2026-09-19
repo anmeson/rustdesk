@@ -388,14 +388,42 @@ jobs:
         # Two SDK-side fixes upstream carries. NOTE `sed -i ''`: upstream's
         # `sed -i -e` is GNU, and BSD sed reads the next argument as a backup
         # suffix -- it edits the file *and* drops a `binding.dart-e` beside it.
+        #
+        # THE RESET IS NOT OPTIONAL. flutter-action caches the SDK, and the
+        # cache is saved at post-job -- i.e. AFTER this step has patched it. So
+        # the second run on any given cache key restores an already-patched SDK
+        # and `git apply` correctly refuses:
+        #
+        #   error: patch failed: .../dropdown_menu.dart:475
+        #   error: .../dropdown_menu.dart: patch does not apply
+        #
+        # which is exactly what killed the arm64 leg of run 35444579868, one
+        # run after 35440571824 had populated that cache. The step works once
+        # per cache key and then fails forever, so it looks like a flake and is
+        # not one. Upstream carries the same bare `git apply` (flutter-build.yml
+        # :229, :650, :831) and has the same latent bug.
+        #
+        # Checking out just the two files we touch, rather than `checkout -- .`,
+        # keeps this from silently reverting anything else in the SDK.
         run: |
           FLUTTER_ROOT="$(dirname "$(dirname "$(which flutter)")")"
+          git -C "$FLUTTER_ROOT" checkout -- \
+            packages/flutter/lib/src/material/dropdown_menu.dart \
+            packages/flutter/lib/src/scheduler/binding.dart
           git -C "$FLUTTER_ROOT" apply \
             "$GITHUB_WORKSPACE/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
           sed -i '' -e 's/_setFramesEnabledState(false);/\/\/&/' \
             "$FLUTTER_ROOT/packages/flutter/lib/src/scheduler/binding.dart"
-          grep -n '_setFramesEnabledState(false);' \
-            "$FLUTTER_ROOT/packages/flutter/lib/src/scheduler/binding.dart"
+          # Assert BOTH landed rather than trusting two exit codes: the sed is a
+          # no-op-looking success if the line ever moves, and the diff is the
+          # half that actually broke.
+          grep -q '//_setFramesEnabledState(false);' \
+            "$FLUTTER_ROOT/packages/flutter/lib/src/scheduler/binding.dart" \
+            || { echo "::error::binding.dart sed did not land"; exit 1; }
+          git -C "$FLUTTER_ROOT" diff --stat -- \
+            packages/flutter/lib/src/material/dropdown_menu.dart | grep -q . \
+            || { echo "::error::dropdown_menu.dart patch did not land"; exit 1; }
+          echo "Flutter SDK patched from a known-clean state"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
