@@ -80,14 +80,37 @@ note() { printf '        %s\n' "$*"; }
 # Where each platform puts the things we care about. RES is where the client
 # looks for custom.txt (BRANDING.md §4) and where LICENCE is conveyed; SNAPSHOT
 # is the compiled Dart, which is what has to contain the notice strings.
-case "$(uname -s)" in
-  Darwin)  PLATFORM=macos;   RES="$ARTIFACT/Contents/Resources"
+#
+# Detected from the ARTIFACT, not from `uname` (T6.10). It used to be the host,
+# which is correct in CI -- each job verifies the platform it just built -- and
+# useless anywhere else: signing a release by hand on a Mac means checking a
+# Linux bundle on a Mac, and the host branch would look for Contents/Resources
+# and fail on a bundle that is perfectly good. `uname` stays as the fallback for
+# an artifact whose shape matches nothing, so the old behaviour is still what
+# you get when detection cannot help.
+if [ -d "$ARTIFACT/Contents/MacOS" ]; then
+  PLATFORM=macos
+elif [ -f "$ARTIFACT/lib/libapp.so" ]; then
+  PLATFORM=linux
+elif [ -f "$ARTIFACT/data/app.so" ]; then
+  PLATFORM=windows
+else
+  case "$(uname -s)" in
+    Darwin) PLATFORM=macos ;;
+    Linux)  PLATFORM=linux ;;
+    *)      PLATFORM=windows ;;
+  esac
+  note "artifact shape unrecognised -- assuming $PLATFORM from the host"
+fi
+
+case "$PLATFORM" in
+  macos)   RES="$ARTIFACT/Contents/Resources"
            SNAPSHOT="$ARTIFACT/Contents/Frameworks/App.framework/App"
            SERVICE="$ARTIFACT/Contents/MacOS/service" ;;
-  Linux)   PLATFORM=linux;   RES="$ARTIFACT"
+  linux)   RES="$ARTIFACT"
            SNAPSHOT="$ARTIFACT/lib/libapp.so"
            SERVICE="" ;;
-  *)       PLATFORM=windows; RES="$ARTIFACT"
+  windows) RES="$ARTIFACT"
            SNAPSHOT="$ARTIFACT/data/app.so"
            SERVICE="" ;;
 esac
@@ -335,6 +358,9 @@ fi
 
 if [ "$PLATFORM" = macos ] && [ "$STAGE" = compile ]; then
   note "skipped: signature (compile stage -- the seal is broken until signing)"
+elif [ "$PLATFORM" = macos ] && ! command -v codesign >/dev/null 2>&1; then
+  # A macOS bundle can now be verified from a Linux box; its signature cannot.
+  note "skipped: signature (no codesign on this host -- verify it on a Mac)"
 elif [ "$PLATFORM" = macos ]; then
   if codesign --verify --deep --strict "$ARTIFACT" 2>/dev/null; then
     ok "code signature valid on disk ($(codesign -dv "$ARTIFACT" 2>&1 \
