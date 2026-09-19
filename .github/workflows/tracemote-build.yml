@@ -144,7 +144,13 @@ jobs:
           PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && inputs.platforms || 'all' }}
         run: |
           ARM='{"arch":"aarch64","os":"macos-14","target":"aarch64-apple-darwin","extra":""}'
-          X86='{"arch":"x86_64","os":"macos-13","target":"x86_64-apple-darwin","extra":"--target x86_64-apple-darwin"}'
+          # macos-15-intel, NOT macos-13. GitHub retired the macOS 13 image, and a
+          # job asking for a retired label does not fail -- it queues forever
+          # (run 35440571824 sat 55 minutes on "Waiting for a runner"). T6.4
+          # measured this leg at 68m14 on macos-13 when that label still
+          # existed; the number in docs/BUILD.md predates the retirement.
+          # Upstream moved to the same label: flutter-build.yml:741.
+          X86='{"arch":"x86_64","os":"macos-15-intel","target":"x86_64-apple-darwin","extra":"--target x86_64-apple-darwin"}'
           case "$PLATFORMS" in
             all)           macos="[$ARM,$X86]"; linux=true;  windows=true  ;;
             macos)         macos="[$ARM,$X86]"; linux=false; windows=false ;;
