@@ -143,14 +143,18 @@ jobs:
         env:
           PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && inputs.platforms || 'all' }}
         run: |
-          ARM='{"arch":"aarch64","os":"macos-14","target":"aarch64-apple-darwin","extra":""}'
-          # macos-15-intel, NOT macos-13. GitHub retired the macOS 13 image, and a
-          # job asking for a retired label does not fail -- it queues forever
-          # (run 35440571824 sat 55 minutes on "Waiting for a runner"). T6.4
-          # measured this leg at 68m14 on macos-13 when that label still
-          # existed; the number in docs/BUILD.md predates the retirement.
-          # Upstream moved to the same label: flutter-build.yml:741.
-          X86='{"arch":"x86_64","os":"macos-15-intel","target":"x86_64-apple-darwin","extra":"--target x86_64-apple-darwin"}'
+          # These two objects must match T6.4's client-release.yml exactly. Both
+          # `extra` values are load-bearing and neither is guessable:
+          #   arm    --screencapturekit, without which the client ships with no
+          #          ScreenCaptureKit capture backend. It BUILDS fine without it
+          #          (docs/BUILD.md), release-verify.sh does not check features,
+          #          and nothing else notices -- so the omission is invisible.
+          #   intel  EMPTY. build.py has no --target flag; the architecture comes
+          #          from the runner being Intel plus the rustup target above.
+          #          Passing one is an instant argparse error, 0.3s into a job
+          #          that has already spent 17 minutes on setup.
+          ARM='{"arch":"aarch64","os":"macos-14","target":"aarch64-apple-darwin","extra":"--screencapturekit"}'
+          X86='{"arch":"x86_64","os":"macos-15-intel","target":"x86_64-apple-darwin","extra":""}'
           case "$PLATFORMS" in
             all)           macos="[$ARM,$X86]"; linux=true;  windows=true  ;;
             macos)         macos="[$ARM,$X86]"; linux=false; windows=false ;;
