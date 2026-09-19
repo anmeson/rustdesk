@@ -1,0 +1,726 @@
+name: TraceMote unsigned build
+
+# The compile half of the TraceMote client pipeline (TASK.md T6.10).
+#
+# Why this file is here and not in the private repo
+# -------------------------------------------------
+# It used to be there, all of it -- see the header T6.4 wrote on
+# tracemote/tracemote's .github/workflows/client-release.yml. That header was
+# right about secrets and wrong about nothing else, but it was written before
+# anyone costed a run: the full matrix bills ~1,230 minutes against a private
+# repo's 3,000/month, because macOS bills at 10x and Windows at 2x. Two and a
+# half releases a month, and the quota ran out on 2026-09-19.
+#
+# GitHub does not meter standard runners on PUBLIC repositories. This fork is
+# public already, because AGPL 6(d) requires it. So the compile moves here and
+# costs nothing, and the private repo keeps the part that actually needs
+# secrets.
+#
+# NOTE this is `workflow_dispatch`, deliberately, and NOT `workflow_call`.
+# A private repo that calls a public repo's reusable workflow runs those jobs in
+# its OWN billing context -- the minutes are charged to the caller exactly as if
+# the YAML had been pasted there. `workflow_call` would have been tidier and
+# would have saved nothing. The jobs have to be *triggered in this repo* to be
+# free, so the handoff is a published prerelease that the private pipeline
+# downloads. (That is also upstream's `publish_unsigned` shape.)
+#
+# What this build deliberately does NOT do
+# ----------------------------------------
+# It does not brand, and it does not sign. No `custom.txt` reaches this
+# workflow, so every artifact here is:
+#
+#   * unbranded  -- no signed config, so a client built from it points at
+#                   rustdesk.com with `require-login` unset. It is not a
+#                   TraceMote client; it is our source, compiled.
+#   * unsigned   -- macOS is not even ad-hoc signed, because the private half
+#                   has to add files to the bundle and every added file breaks
+#                   the seal anyway (docs/BUILD.md, the ordering trap).
+#   * unpacked   -- Windows stops at the Release tree. The portable packer
+#                   swallows the whole directory into one exe, so packing here
+#                   would mean packing without `custom.txt` in it.
+#
+# That is the whole point: nothing this job produces is a shippable TraceMote
+# build, which is why publishing it from a public repo gives nothing away.
+#
+# What it DOES carry
+# ------------------
+# Two of the four build-time inputs, because both are compile-time and neither
+# is secret:
+#
+#   TRACEMOTE_SOURCE_COMMIT / _DATE   the AGPL 5(a) stamp, via patch B7
+#   TRACEMOTE_CUSTOM_PK               the trust anchor, via patch C1
+#
+# The public key is a repository *variable*. It is inside every binary we ship
+# and a wrong value is a silent product failure, so plain text beats a secret.
+# The private key that signs configs against it has never been in CI at all
+# (docs/BRANDING.md 3) and still is not.
+#
+# The stamp is now this repo's own HEAD rather than a submodule pointer read
+# from the parent, which is strictly more correct -- it is the commit a reader
+# of the AGPL notice would need, and it cannot drift from what was compiled.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Which targets to build ("all" is the only release set)
+        type: choice
+        default: all
+        options: [all, macos, macos-aarch64, macos-x86_64, linux, windows]
+      release_tag:
+        description: Publish a prerelease under this tag (blank = artifacts only)
+        type: string
+        default: ""
+  push:
+    tags: ["client-v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
+
+env:
+  # Pinned to what docs/BUILD.md verified, not to "latest". Every one of these
+  # is a version somebody had to discover; see the Traps section of that file.
+  FLUTTER_VERSION: "3.24.5"
+  MAC_RUST_VERSION: "1.81"          # cidre's floor, .github/workflows/flutter-build.yml:23
+  RUST_VERSION: "1.75"              # every other target, upstream's pin
+  FLUTTER_RUST_BRIDGE_VERSION: "1.80.1"
+  CARGO_EXPAND_VERSION: "1.0.95"    # frb v1 shells out to `cargo expand`
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  NASM_VERSION: "2.16.03"           # NOT brew's nasm, which is 3.x
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  TRACEMOTE_CUSTOM_PK: ${{ vars.TRACEMOTE_CUSTOM_PK }}
+
+jobs:
+  # ---------------------------------------------------------------- preflight
+  # Much smaller than the private repo's job of the same name. That one verifies
+  # the signed config against the key being compiled in; there is no config
+  # here, so this only works out the stamp and which jobs to start.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      source_commit: ${{ steps.stamp.outputs.commit }}
+      source_date: ${{ steps.stamp.outputs.date }}
+      macos_matrix: ${{ steps.targets.outputs.macos }}
+      build_linux: ${{ steps.targets.outputs.linux }}
+      build_windows: ${{ steps.targets.outputs.windows }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - id: stamp
+        # github.sha, not a submodule pointer. This IS the fork.
+        run: |
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Check the trust anchor is set
+        # Not fatal. An unbranded build is what this workflow produces anyway,
+        # and a missing key here only means the private half will reject the
+        # artifact at its own verify step -- which is the right place to fail,
+        # because that is where the matching config exists. But say so loudly:
+        # discovering it after 36 minutes of macOS build is the bad outcome.
+        run: |
+          if [ -z "${TRACEMOTE_CUSTOM_PK:-}" ]; then
+            echo "::warning::vars.TRACEMOTE_CUSTOM_PK is not set."
+            echo "::warning::These artifacts will trust upstream's key and the"
+            echo "::warning::private pipeline will fail release-verify.sh 3."
+          else
+            echo "trust anchor: $TRACEMOTE_CUSTOM_PK (len ${#TRACEMOTE_CUSTOM_PK})"
+          fi
+
+      - id: targets
+        # Which build jobs run, decided on the free runner before any of them
+        # start. The macOS matrix is emitted as JSON rather than filtered with a
+        # job-level `if`, because a skipped matrix leg still shows as a job and
+        # this way an unwanted runner is never allocated at all.
+        #
+        # Minutes are free here, so this is no longer a cost control -- it is an
+        # iteration control. A full matrix still takes over an hour of wall
+        # clock, and a tag push always means everything.
+        env:
+          PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && inputs.platforms || 'all' }}
+        run: |
+          ARM='{"arch":"aarch64","os":"macos-14","target":"aarch64-apple-darwin","extra":""}'
+          X86='{"arch":"x86_64","os":"macos-13","target":"x86_64-apple-darwin","extra":"--target x86_64-apple-darwin"}'
+          case "$PLATFORMS" in
+            all)           macos="[$ARM,$X86]"; linux=true;  windows=true  ;;
+            macos)         macos="[$ARM,$X86]"; linux=false; windows=false ;;
+            macos-aarch64) macos="[$ARM]";      linux=false; windows=false ;;
+            macos-x86_64)  macos="[$X86]";      linux=false; windows=false ;;
+            linux)         macos="[]";          linux=true;  windows=false ;;
+            windows)       macos="[]";          linux=false; windows=true  ;;
+            *)             echo "::error::unknown platforms: $PLATFORMS"; exit 1 ;;
+          esac
+          {
+            echo "macos=$macos"
+            echo "linux=$linux"
+            echo "windows=$windows"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::building $PLATFORMS -- macos=$macos linux=$linux windows=$windows"
+
+      - name: Record the stamp for the private half
+        # The private pipeline needs the commit to write the AGPL source offer
+        # into its release body, and it must be the commit that was actually
+        # compiled -- not whatever the fork's default branch points at by the
+        # time signing runs. Shipped as a file so it travels with the artifacts.
+        run: |
+          {
+            echo "commit=${{ steps.stamp.outputs.commit }}"
+            echo "date=${{ steps.stamp.outputs.date }}"
+            echo "run_id=${{ github.run_id }}"
+            echo "custom_pk=${TRACEMOTE_CUSTOM_PK:-}"
+          } > build-stamp.txt
+          cat build-stamp.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-stamp
+          path: build-stamp.txt
+
+  # ------------------------------------------------------------------- bridge
+  # flutter_rust_bridge_codegen, generated once on Linux and reused by every
+  # platform, exactly as upstream's bridge.yml does it. Not optional and easy to
+  # forget: src/bridge_generated.rs, flutter/lib/generated_bridge.dart AND
+  # flutter/macos/Runner/bridge_generated.h are all gitignored, so a build
+  # without this step fails on missing files that never appear in any diff.
+  bridge:
+    needs: preflight
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang cmake curl gcc git g++ libclang-dev \
+            libgtk-3-dev llvm-dev nasm ninja-build pkg-config wget
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: bridge
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # 3.22.3, not FLUTTER_VERSION: upstream generates the bridge on the
+          # older SDK and consumes it on 3.24.5. Do not "fix" this to match.
+          flutter-version: "3.22.3"
+          cache: true
+
+      - name: Generate the bridge
+        run: |
+          cargo install cargo-expand --version "$CARGO_EXPAND_VERSION" --locked
+          cargo install flutter_rust_bridge_codegen \
+            --version "$FLUTTER_RUST_BRIDGE_VERSION" --features uuid --locked
+          # extended_text 14 needs a newer Dart than 3.22.3 resolves; upstream
+          # downgrades it for codegen only. Throwaway -- not patch B6.
+          sed -i -e 's/extended_text: 14.0.0/extended_text: 13.0.0/g' flutter/pubspec.yaml
+          (cd flutter && flutter pub get)
+          ~/.cargo/bin/flutter_rust_bridge_codegen \
+            --rust-input ./src/flutter_ffi.rs \
+            --dart-output ./flutter/lib/generated_bridge.dart \
+            --c-output ./flutter/macos/Runner/bridge_generated.h
+          git checkout -- flutter/pubspec.yaml flutter/pubspec.lock
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bridge
+          path: |
+            src/bridge_generated.rs
+            src/bridge_generated.io.rs
+            flutter/lib/generated_bridge.dart
+            flutter/lib/generated_bridge.freezed.dart
+            flutter/macos/Runner/bridge_generated.h
+
+  # ------------------------------------------------------------------ notices
+  # LICENSING.md 5 step 7. The AGPL notices are a legal deliverable, so they
+  # have a test -- and it is the one release check that can run without building
+  # anything: source_offer.dart imports nothing, so this is a plain unit test.
+  #
+  # Run WITH the defines, deliberately. Without them the two stamped tests skip
+  # themselves rather than assert the fallback, so an unstamped green run would
+  # prove nothing about a release. 8 tests with, 6 and 2 skipped without.
+  notices:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, flutter-version: "${{ env.FLUTTER_VERSION }}", cache: true }
+      - name: Run the notice tests
+        working-directory: flutter
+        env:
+          TRACEMOTE_SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
+          TRACEMOTE_SOURCE_DATE: ${{ needs.preflight.outputs.source_date }}
+        run: |
+          flutter pub get
+          flutter test test/source_offer_test.dart \
+            --dart-define=TRACEMOTE_SOURCE_COMMIT="$TRACEMOTE_SOURCE_COMMIT" \
+            --dart-define=TRACEMOTE_SOURCE_DATE="$TRACEMOTE_SOURCE_DATE"
+
+  # -------------------------------------------------------------------- macOS
+  # The only target whose build is verified end to end (docs/BUILD.md, and the
+  # release path re-run for T6.4 on 2026-09-16). Shorter than upstream's job
+  # because patches B1-B6 are committed in this fork: upstream's macOS job
+  # applies B2-B4 as throwaway `sed`s at build time and we do not need them.
+  macos:
+    needs: [preflight, bridge, notices]
+    if: needs.preflight.outputs.macos_matrix != '[]'
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.preflight.outputs.macos_matrix) }}
+    runs-on: ${{ matrix.os }}
+    env:
+      TRACEMOTE_SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
+      TRACEMOTE_SOURCE_DATE: ${{ needs.preflight.outputs.source_date }}
+      MACOSX_DEPLOYMENT_TARGET: "12.3"
+      VCPKG_DISABLE_METRICS: "1"
+    steps:
+      - name: Export GitHub Actions cache variables for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: actions/download-artifact@v4
+        with: { name: bridge, path: . }
+
+      - name: Install build runtime
+        run: |
+          # Both of these are conditional, and for the same reason: the runner
+          # images already ship them some months and not others, and `brew
+          # install` over an existing one fails the step over nothing.
+          #
+          # cocoapods is the one that actually bit us. The Intel image has a
+          # gem-installed `pod` at /usr/local/bin/pod, so the bottle pours but
+          # `brew link` refuses to overwrite it and the step exits 1 -- while
+          # the arm64 image has no such gem and installs cleanly. Upstream's CI
+          # never installs cocoapods at all, for exactly this reason.
+          #
+          # create-dmg is NOT installed here any more. The dmg is built on the
+          # private side, after signing, because create-dmg seals the image
+          # around whatever the bundle contained at the moment it ran.
+          command -v pod        >/dev/null || brew install cocoapods
+          command -v pkg-config >/dev/null || brew install pkg-config
+          pod --version
+
+      - name: Cache NASM ${{ env.NASM_VERSION }}
+        # Keyed on the version and the runner, because the two runners build
+        # different architectures into the same prefix.
+        #
+        # The two binaries, not the whole of ~/.local: the prefix stays what
+        # docs/BUILD.md tells a human to use, but actions/cache saves at
+        # post-job, so caching the directory would archive whatever anything
+        # else dropped in there during the build.
+        id: nasm
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/bin/nasm
+            ~/.local/bin/ndisasm
+          key: nasm-${{ env.NASM_VERSION }}-${{ matrix.os }}
+
+      - name: Install NASM ${{ env.NASM_VERSION }} from source
+        if: steps.nasm.outputs.cache-hit != 'true'
+        # Three vcpkg ports (aom, libvpx, ffmpeg) call
+        # vcpkg_find_acquire_program(NASM), which on macOS downloads nothing and
+        # tells you to `brew install nasm` -- which gives you NASM 3.x, a
+        # rewrite with incompatible CLI options. aom is attempted first, so the
+        # build dies about thirty seconds in.
+        #
+        # Upstream's CI unzips a prebuilt nasm-2.16.03-macosx.zip; that binary
+        # is x86_64 (docs/BUILD.md), so on the arm64 runner it depends on
+        # Rosetta being present. Building from source takes under a minute,
+        # needs no sudo, and is native on both runners.
+        run: |
+          curl -sSLO "https://www.nasm.us/pub/nasm/releasebuilds/${NASM_VERSION}/nasm-${NASM_VERSION}.tar.gz"
+          tar xzf "nasm-${NASM_VERSION}.tar.gz"
+          cd "nasm-${NASM_VERSION}"
+          ./configure --prefix="$HOME/.local" >/dev/null
+          make -j"$(sysctl -n hw.ncpu)" >/dev/null && make install >/dev/null
+
+      - name: Put NASM on PATH
+        # Separate step: it must run on a cache hit as well, when the step above
+        # is skipped. Asserting the version here also turns a poisoned cache
+        # into a clear failure rather than an aom build dying thirty seconds in.
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/nasm" -v
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Patch the Flutter SDK
+        # Two SDK-side fixes upstream carries. NOTE `sed -i ''`: upstream's
+        # `sed -i -e` is GNU, and BSD sed reads the next argument as a backup
+        # suffix -- it edits the file *and* drops a `binding.dart-e` beside it.
+        run: |
+          FLUTTER_ROOT="$(dirname "$(dirname "$(which flutter)")")"
+          git -C "$FLUTTER_ROOT" apply \
+            "$GITHUB_WORKSPACE/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+          sed -i '' -e 's/_setFramesEnabledState(false);/\/\/&/' \
+            "$FLUTTER_ROOT/packages/flutter/lib/src/scheduler/binding.dart"
+          grep -n '_setFramesEnabledState(false);' \
+            "$FLUTTER_ROOT/packages/flutter/lib/src/scheduler/binding.dart"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MAC_RUST_VERSION }}
+          targets: ${{ matrix.target }}
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: ${{ matrix.os }}
+          cache-on-failure: true
+
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+
+      - name: Install vcpkg ports
+        run: |
+          "$VCPKG_ROOT/vcpkg" install --x-install-root="$VCPKG_ROOT/installed"
+
+      - name: Show the build-time inputs
+        # The first T6.4 run produced a result the env block cannot explain: the
+        # commit define reached the binary and the date define did not, though
+        # both come from the same two lines above and the same loop in build.py.
+        # TRACEMOTE_CUSTOM_PK was missing from the dylib too, while the preflight
+        # job -- reading the same workflow-level env -- had just validated it.
+        # So: print what the build actually receives rather than reason about it
+        # again. The public key is a repository variable, not a secret.
+        run: |
+          printf 'TRACEMOTE_SOURCE_COMMIT = [%s] (len %s)\n' \
+            "${TRACEMOTE_SOURCE_COMMIT:-}" "${#TRACEMOTE_SOURCE_COMMIT}"
+          printf 'TRACEMOTE_SOURCE_DATE   = [%s] (len %s)\n' \
+            "${TRACEMOTE_SOURCE_DATE:-}" "${#TRACEMOTE_SOURCE_DATE}"
+          printf 'TRACEMOTE_CUSTOM_PK     = [%s] (len %s)\n' \
+            "${TRACEMOTE_CUSTOM_PK:-}" "${#TRACEMOTE_CUSTOM_PK}"
+          python3 - <<'EOF'
+          import sys, importlib.util
+          spec = importlib.util.spec_from_file_location("bp", "build.py")
+          m = importlib.util.module_from_spec(spec)
+          sys.argv = ["build.py"]
+          spec.loader.exec_module(m)
+          print("build.py will append:", repr(m.dart_defines()))
+          EOF
+
+      - name: Build
+        # TRACEMOTE_CUSTOM_PK reaches cargo (patch C1) and TRACEMOTE_SOURCE_* reach
+        # `flutter build` (patch B7) through the environment -- build.py takes
+        # no flags for either. build.rs carries rerun-if-env-changed for the
+        # key, so a changed key rebuilds instead of reusing a stale object file
+        # that still trusts the previous one.
+        run: ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.extra }}
+
+      - name: Convey LICENCE with the binary
+        # AGPL 4. This one file CAN go in here, unlike custom.txt: it is public,
+        # it is in this repo, and it is identical for every deployment. The
+        # bundle is unsigned at this point so nothing is being invalidated --
+        # the private half adds custom.txt and signs after both are in.
+        env:
+          APP: flutter/build/macos/Build/Products/Release/TraceMote.app
+        run: cp LICENCE "$APP/Contents/Resources/LICENCE"
+
+      - name: Verify what can be verified without the config
+        # release-verify.sh runs twice in this pipeline, here and again on the
+        # private side after injection and signing. It was already written to
+        # degrade: with TRACEMOTE_CUSTOM_TXT unset it skips the custom.txt and
+        # launcher-name checks and still asserts LICENCE, the service binary,
+        # the AGPL stamp and the trust anchor. Those four are all compile-time,
+        # which means THIS is the job that can still do something about them.
+        run: ./scripts/release-verify.sh flutter/build/macos/Build/Products/Release/TraceMote.app
+
+      - name: Tar the unsigned bundle
+        # tar, not upload-artifact on the directory. A .app is full of symlinks
+        # (Contents/Frameworks/*.framework/Versions/Current, and every dylib
+        # under it) and actions/upload-artifact resolves them into duplicate
+        # regular files -- upstream hit exactly this and worked around it by
+        # uploading a dmg instead. tar preserves them, and unlike a dmg it can
+        # be opened on the private side without hdiutil.
+        #
+        # -H is not passed on purpose: symlinks must stay symlinks.
+        run: |
+          tar czf "tracemote-macos-${{ matrix.arch }}-unsigned.tar.gz" \
+            -C flutter/build/macos/Build/Products/Release TraceMote.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tracemote-macos-${{ matrix.arch }}-unsigned
+          path: tracemote-macos-${{ matrix.arch }}-unsigned.tar.gz
+
+  # -------------------------------------------------------------------- Linux
+  # NEVER RUN. Written from upstream's build-rustdesk-linux job; no Linux client
+  # has been built in this project, so treat the first run as the task, not as a
+  # regression. The release-critical half -- the stamp via B7, release-verify.sh
+  # -- is shared with macOS and is the part that has been exercised.
+  #
+  # Produces a tarball of the bundle, NOT a .deb -- see the packaging note in
+  # the private pipeline. A .deb that quietly omits LICENCE would be worse than
+  # no .deb.
+  linux:
+    needs: [preflight, bridge, notices]
+    if: needs.preflight.outputs.build_linux == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      TRACEMOTE_SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
+      TRACEMOTE_SOURCE_DATE: ${{ needs.preflight.outputs.source_date }}
+      VCPKG_DISABLE_METRICS: "1"
+    steps:
+      - name: Export GitHub Actions cache variables for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: actions/download-artifact@v4
+        with: { name: bridge, path: . }
+
+      - name: Install prerequisites
+        # `libunwind-dev` is explicit on purpose. Without it the first run died
+        # on `libgstreamer1.0-dev : Depends: libunwind-dev` / "you have held
+        # broken packages": the ubuntu-22.04 image ships a libunwind that apt
+        # will not reconcile on its own, and apt reports it as unsatisfiable
+        # rather than pulling it in.
+        #
+        # Worth knowing before trusting this list: upstream does NOT build Linux
+        # on the bare runner. Its job runs the whole build inside an **Ubuntu
+        # 18.04 container** (`rustdesk-org/run-on-arch-action`, `distro:
+        # ubuntu18.04`) with its own package list, which is why its
+        # `libclang-10-dev` / `llvm-10-dev` pins mean nothing here. This job is
+        # the same build on a newer distro, and that difference is unproven.
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential clang cmake curl gcc git g++ \
+            libasound2-dev libayatana-appindicator3-dev libclang-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libgtk-3-dev libpam0g-dev libpulse-dev libunwind-dev libva-dev \
+            libvdpau-dev libxcb-randr0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxdo-dev libxfixes-dev llvm-dev nasm \
+            ninja-build pkg-config python3 rpm tree unzip wget
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with: { prefix-key: linux, cache-on-failure: true }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, flutter-version: "${{ env.FLUTTER_VERSION }}", cache: true }
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+
+      - name: Install vcpkg ports
+        run: |
+          "$VCPKG_ROOT/vcpkg" install --x-install-root="$VCPKG_ROOT/installed"
+
+      - name: Build
+        run: ./build.py --flutter --hwcodec --unix-file-copy-paste
+
+      - name: Convey LICENCE with the binary
+        env:
+          BUNDLE: flutter/build/linux/x64/release/bundle
+        run: cp LICENCE "$BUNDLE/LICENCE"
+
+      - name: Verify what can be verified without the config
+        run: ./scripts/release-verify.sh flutter/build/linux/x64/release/bundle
+
+      - name: Tar the bundle
+        # Tarred rather than uploaded as a tree so the executable bit survives.
+        run: |
+          tar czf tracemote-linux-x86_64-unsigned.tar.gz \
+            -C flutter/build/linux/x64/release bundle
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tracemote-linux-x86_64-unsigned
+          path: tracemote-linux-x86_64-unsigned.tar.gz
+
+  # ------------------------------------------------------------------ Windows
+  # NEVER RUN -- same caveat as Linux, and more of it: the msi packaging path in
+  # build.py is the least exercised code in this pipeline, and Windows is the
+  # one platform where the unsigned `rustdesk-host=...,key=....exe` filename
+  # mechanism also exists (docs/BRANDING.md 6). We do not use it; custom.txt
+  # next to the executable is the same mechanism as everywhere else.
+  #
+  # This job stops at the Release TREE and does not pack. See the note on the
+  # private pipeline's pack step for why that split is forced rather than tidy.
+  windows:
+    needs: [preflight, bridge, notices]
+    if: needs.preflight.outputs.build_windows == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 140
+    env:
+      TRACEMOTE_SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
+      TRACEMOTE_SOURCE_DATE: ${{ needs.preflight.outputs.source_date }}
+      VCPKG_DISABLE_METRICS: "1"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Export GitHub Actions cache variables for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: actions/download-artifact@v4
+        with: { name: bridge, path: . }
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with: { prefix-key: windows, cache-on-failure: true }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, flutter-version: "${{ env.FLUTTER_VERSION }}", cache: true }
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+
+      - name: Install vcpkg ports
+        # --triplet is NOT optional here, unlike on macOS and Linux where the
+        # default host triplet is already the right one. Windows defaults to
+        # x64-windows (dynamic CRT), but .cargo/config.toml builds this target
+        # with `-Ctarget-feature=+crt-static`, so hwcodec's build script looks
+        # for its ffmpeg headers under installed/x64-windows-static/. Without
+        # this the ports install fine into the wrong triplet and the build dies
+        # much later with `Cannot open include file: 'libavutil/attributes.h'`
+        # while printing an -I flag that looks perfectly correct.
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+        run: |
+          if ! "$VCPKG_ROOT/vcpkg" install --triplet x64-windows-static \
+               --x-install-root="$VCPKG_ROOT/installed"; then
+            # vcpkg's own logs say why a port failed; the step output does not.
+            find "$VCPKG_ROOT/" -name "*.log" | while read -r f; do
+              echo "== $f"; cat "$f"; echo
+            done
+            exit 1
+          fi
+
+      - name: Build
+        # PowerShell, not the job's default bash -- and this is not a style
+        # choice. Under Git-for-Windows bash, `/usr/bin` precedes the MSVC
+        # toolchain on PATH, so rustc's linker invocation resolves `link.exe` to
+        # Git's coreutils `link` and every build script dies with
+        # `/usr/bin/link: extra operand`. Upstream drives build.py from
+        # PowerShell for the same reason.
+        shell: pwsh
+        # --skip-portable-pack for the same reason T6.4 used it, one step
+        # further on. build.py's packer bundles flutter_build_dir into a
+        # self-extracting exe at the end of the same call that builds it
+        # (build.py:968-984) -- before anything can put LICENCE and custom.txt
+        # in the bundle. T6.4 re-ran the pack by hand two steps later. This
+        # pipeline cannot: custom.txt does not exist in this repo, so the pack
+        # has to happen on the private side, after injection.
+        run: python .\build.py --flutter --hwcodec --skip-portable-pack
+
+      - name: Convey LICENCE with the binary
+        env:
+          BUNDLE: flutter/build/windows/x64/runner/Release
+        run: cp LICENCE "$BUNDLE/LICENCE"
+
+      - name: Verify what can be verified without the config
+        run: ./scripts/release-verify.sh flutter/build/windows/x64/runner/Release
+
+      - name: Tar the unpacked Release tree
+        # The whole tree, unlike T6.4's job which uploaded only the packed
+        # installer. The private side needs every file to pack it there.
+        run: |
+          tar czf tracemote-windows-x86_64-unsigned.tar.gz \
+            -C flutter/build/windows/x64/runner Release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tracemote-windows-x86_64-unsigned
+          path: tracemote-windows-x86_64-unsigned.tar.gz
+
+  # -------------------------------------------------------- publish, unsigned
+  # The handoff. Artifacts expire and need an API token to fetch; a release
+  # asset on a public repo is a plain URL that `curl` can reach with no
+  # credentials at all, which is what keeps the private pipeline free of any
+  # token for this repo.
+  #
+  # PRERELEASE, always, and named `-unsigned` on every asset. Someone will find
+  # these -- they are public and they are attached to an AGPL client. They must
+  # be impossible to mistake for a TraceMote release: they are unbranded, so
+  # they do not even talk to our servers.
+  publish-unsigned:
+    needs: [preflight, macos, linux, windows]
+    # The whole matrix or nothing, exactly as the private pipeline's publish
+    # job works: a partial set would produce a release tag whose Linux asset is
+    # from a different commit than its macOS one.
+    if: ${{ github.event_name == 'push' || inputs.release_tag != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - run: ls -la dist/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: ${{ inputs.release_tag || github.ref_name }} (unsigned build inputs)
+          body: |
+            **These are not TraceMote releases.** They are the compile output of
+            this fork at `${{ needs.preflight.outputs.source_commit }}`, published
+            so that the signing pipeline in the private repo can fetch them
+            without a token.
+
+            Every asset here is:
+
+            - **unbranded** — no signed `custom.txt`, so a client built from one
+              points at `rustdesk.com` and has `require-login` unset
+            - **unsigned** — macOS is not ad-hoc signed either; Windows is not
+              packed into an installer
+
+            If you are looking for the TraceMote client, these will not work.
+            If you are exercising your AGPL §6(d) rights, the corresponding
+            source is this repository at the commit above.
+          files: dist/**
